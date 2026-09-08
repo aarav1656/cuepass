@@ -1,7 +1,8 @@
 """FastAPI web application for SIXTEEN SEVENTEEN.
 
-Single dark HTML page showing before/after subtitle QC results with the
-cited spec source. No rainbow gradients. No emoji headers. No AI slop.
+Spotting-sheet UI: near-black Verge 2024 system, Anton display,
+Space Mono labels, mint #3cffd0 for repaired state and primary action only.
+No Inter. No off-white blog. No pill buttons. No emoji.
 """
 
 from __future__ import annotations
@@ -50,376 +51,556 @@ HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SIXTEEN SEVENTEEN: subtitle compliance, measured and repaired</title>
+  <title>SIXTEEN SEVENTEEN</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    /* Tokens from DESIGN.md (ElevenLabs design system), used verbatim.
-       Chosen deliberately: this product is about subtitles, which are typography
-       under a legal reading-speed limit. Judging cue text on a near-black
-       dashboard is the wrong surface. An off-white editorial page renders the
-       thing being measured the way a reader actually meets it. Waldenburg is
-       licensed, so the display face is EB Garamond, the substitute the design
-       file itself names. Tokens live here once, never inline on elements. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     :root {
-      --primary: #292524; --primary-active: #0c0a09;
-      --ink: #0c0a09; --body: #4e4e4e; --body-strong: #292524;
-      --muted: #777169; --muted-soft: #a8a29e;
-      --hairline: #e7e5e4; --hairline-soft: #f0efed; --hairline-strong: #d6d3d1;
-      --canvas: #f5f5f5; --canvas-soft: #fafafa; --canvas-deep: #0c0a09;
-      --surface-card: #ffffff; --surface-strong: #f0efed;
-      --surface-dark: #0c0a09; --surface-dark-elevated: #1c1917;
-      --on-primary: #ffffff; --on-dark: #ffffff; --on-dark-soft: #a8a29e;
-      --error: #dc2626; --success: #16a34a; --warn: #b45309;
-
-      --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-pill: 9999px;
-      --s-xs: 8px; --s-sm: 12px; --s-base: 16px; --s-md: 20px;
-      --s-lg: 24px; --s-xl: 32px; --s-xxl: 48px; --s-section: 96px;
-
-      --display: 'EB Garamond', 'Times New Roman', serif;
-      --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+      --canvas:    #131313;
+      --surface:   #1c1c1c;
+      --surface-2: #2d2d2d;
+      --border:    #252525;
+      --border-hi: #383838;
+      --text:      #ffffff;
+      --text-2:    #949494;
+      --text-3:    #555555;
+      --mint:      #3cffd0;
+      --uv:        #5200ff;
+      --red:       #ff3b3b;
+      --display:   'Anton', Impact, 'Helvetica Neue', sans-serif;
+      --mono:      'Space Mono', ui-monospace, 'JetBrains Mono', monospace;
+      --body:      -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     }
 
+    html, body { height: 100%; }
+
     body {
-      background: var(--canvas); color: var(--body);
-      font: 400 16px/1.5 var(--sans); letter-spacing: 0.16px;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 14px;
+      line-height: 1.5;
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Display type is the licensed-serif tier: light weight, negative tracking,
-       never bold. This system whispers; it does not shout. */
-    h1 {
-      font-family: var(--display); font-size: 48px; font-weight: 300;
-      line-height: 1.08; letter-spacing: -0.96px; color: var(--ink);
+    .layout {
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      grid-template-columns: 252px 1fr;
+      grid-template-areas: "hd hd" "sb mn";
+      min-height: 100vh;
     }
-    h2 {
-      font-family: var(--display); font-size: 32px; font-weight: 300;
-      line-height: 1.13; letter-spacing: -0.32px; color: var(--ink);
-    }
-    .eyebrow {
-      font: 600 12px/1.4 var(--sans); letter-spacing: 0.96px;
-      text-transform: uppercase; color: var(--muted);
-    }
-    .lede { font-size: 18px; line-height: 1.55; color: var(--body); max-width: 64ch; }
 
+    /* ---- header ---- */
     header {
-      border-bottom: 1px solid var(--hairline);
-      padding: var(--s-xl) var(--s-xl) var(--s-lg);
-      background: var(--canvas-soft);
+      grid-area: hd;
+      border-bottom: 1px solid var(--border-hi);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
     }
-    main { max-width: 1120px; margin: 0 auto; padding: var(--s-xl); }
 
-    /* Cards are white on the off-white canvas, separated by a hairline rather
-       than a shadow. Print-page logic, not dashboard-panel logic. */
-    .card, .panel {
-      background: var(--surface-card); border: 1px solid var(--hairline);
-      border-radius: var(--r-lg); padding: var(--s-lg);
+    .wordmark {
+      font-family: var(--display);
+      font-size: 22px;
+      letter-spacing: 2px;
+      line-height: 1;
+      color: var(--text);
     }
-    .card + .card, .panel + .panel { margin-top: var(--s-lg); }
 
-    button {
-      background: var(--primary); color: var(--on-primary); border: 0;
-      border-radius: var(--r-pill); padding: 12px 24px; height: 44px;
-      font: 500 15px/1 var(--sans); cursor: pointer;
-      transition: background .15s ease;
+    .wordmark-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
     }
-    button:hover:not(:disabled) { background: var(--primary-active); }
-    button:disabled { background: var(--hairline-strong); color: var(--muted); cursor: default; }
 
-    input, select {
-      background: var(--surface-card); border: 1px solid var(--hairline-strong);
-      border-radius: var(--r-md); padding: 11px 14px;
-      font: 400 15px/1 var(--sans); color: var(--ink);
+    /* ---- sidebar ---- */
+    aside {
+      grid-area: sb;
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
     }
-    input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
 
-    /* Numbers stay monospaced so cue timings and character counts align. */
-    .stat {
-      font-family: var(--display); font-size: 48px; font-weight: 300;
-      line-height: 1.08; letter-spacing: -0.96px; color: var(--ink);
+    .field-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      display: block;
+      margin-bottom: 6px;
     }
-    .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-    .pass, .delta-good { color: var(--success); font-weight: 500; }
-    .fail { color: var(--error); font-weight: 500; }
-    .warn { color: var(--warn); font-weight: 500; }
-    .delta-neutral { color: var(--muted); }
 
-    table, .cue-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th {
-      text-align: left; font: 600 12px/1.4 var(--sans); letter-spacing: 0.96px;
-      text-transform: uppercase; color: var(--muted);
-      padding: 10px 8px; border-bottom: 1px solid var(--hairline-strong);
+    select, input[type="text"] {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 2px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 13px;
+      -webkit-appearance: none;
     }
-    td {
-      padding: 11px 8px; border-bottom: 1px solid var(--hairline);
-      vertical-align: top; color: var(--body);
+    select:focus, input:focus {
+      outline: 1px solid var(--mint);
+      border-color: var(--mint);
     }
-    tr:last-child td { border-bottom: 0; }
+    select option { background: var(--surface); }
 
-    /* Cue text is the subject of the product, so it is set as reading text at a
-       readable size, not squeezed into a data cell. */
-    .cue-text { font-family: var(--display); font-size: 17px; line-height: 1.45; color: var(--ink); }
+    .run-btn {
+      width: 100%;
+      background: var(--mint);
+      color: #000;
+      border: 0;
+      border-radius: 2px;
+      padding: 10px 16px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .run-btn:hover:not(:disabled) { opacity: 0.82; }
+    .run-btn:disabled {
+      background: var(--surface-2);
+      color: var(--text-3);
+      cursor: default;
+    }
 
-    .badge {
-      display: inline-block; font: 600 12px/1 var(--sans); letter-spacing: 0.96px;
-      text-transform: uppercase; padding: 6px 10px; border-radius: var(--r-pill);
-      background: var(--surface-strong); color: var(--body-strong);
+    .status-line {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      letter-spacing: 0.4px;
+      min-height: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .badge.live { background: var(--ink); color: var(--on-dark); }
-    .badge.cached { background: var(--surface-strong); color: var(--muted); }
-
-    .spec-citation {
-      font-size: 14px; color: var(--muted); border-left: 2px solid var(--hairline-strong);
-      padding-left: var(--s-sm); margin-top: var(--s-xs);
-    }
-    .error-box {
-      background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
-      border-radius: var(--r-md); padding: var(--s-base); font-size: 14px;
-    }
-    .improvement-banner {
-      background: var(--surface-dark); color: var(--on-dark);
-      border-radius: var(--r-lg); padding: var(--s-lg); margin-top: var(--s-lg);
-    }
-    .improvement-banner .stat { color: var(--on-dark); }
-
-    .stats-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: var(--s-lg); align-items: start;
-    }
-    .form-row { display: flex; gap: var(--s-sm); flex-wrap: wrap; align-items: center; }
-    .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-lg); }
-    @media (max-width: 720px) { .before-after { grid-template-columns: 1fr; } }
-
-    .check-row {
-      display: flex; justify-content: space-between; gap: var(--s-base);
-      padding: 12px 0; border-bottom: 1px solid var(--hairline);
-    }
-    .check-row:last-child { border-bottom: 0; }
 
     .spinner {
-      width: 16px; height: 16px; border: 2px solid var(--hairline-strong);
-      border-top-color: var(--ink); border-radius: var(--r-pill);
-      display: inline-block; animation: spin .7s linear infinite;
+      width: 10px; height: 10px;
+      border: 1px solid var(--border-hi);
+      border-top-color: var(--mint);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
-    a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
-    a:hover { color: var(--muted); }
-    code { font-family: var(--mono); font-size: 13px; color: var(--body-strong); }
+    .spec-block {
+      border-left: 2px solid var(--border-hi);
+      padding-left: 10px;
+    }
+    .spec-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 2px 5px;
+      border: 1px solid var(--border-hi);
+      border-radius: 1px;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+    .spec-badge.live   { border-color: var(--mint); color: var(--mint); }
+    .spec-badge.cached { color: var(--text-3); }
+    .spec-block p {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: 0.3px;
+      line-height: 1.7;
+      word-break: break-all;
+    }
+    .spec-block a { color: var(--text-3); text-decoration: none; }
+    .spec-block a:hover { color: var(--mint); }
+
+    /* ---- main ---- */
+    main { grid-area: mn; overflow-y: auto; }
+
+    /* pre-run: known films reference table */
+    .prerun { padding: 28px; }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 16px;
+    }
+
+    .known-tbl { width: 100%; border-collapse: collapse; }
+    .known-tbl th {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-hi);
+    }
+    .known-tbl td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 13px;
+      vertical-align: top;
+    }
+    .known-tbl td:first-child {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .known-tbl tr { cursor: pointer; }
+    .known-tbl tr:hover td { background: var(--surface); }
+
+    /* ---- summary strip ---- */
+    .summary-strip {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border-hi);
+      padding: 12px 24px;
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .sum-title {
+      font-family: var(--display);
+      font-size: 20px;
+      letter-spacing: 1px;
+      color: var(--text);
+      margin-right: 4px;
+    }
+    .sum-stat {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      color: var(--text-2);
+    }
+    .sum-n      { color: var(--text); font-weight: 700; }
+    .sum-n.red  { color: var(--red); }
+    .sum-n.mint { color: var(--mint); }
+    .sum-sep    { color: var(--border-hi); font-family: var(--mono); font-size: 11px; }
+
+    /* ---- spotting sheet ---- */
+    .sheet-header {
+      display: grid;
+      grid-template-columns: 52px 1fr 72px 80px;
+      gap: 0 12px;
+      padding: 8px 24px;
+      border-bottom: 1px solid var(--border-hi);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .cue-row {
+      display: grid;
+      grid-template-columns: 52px 1fr 72px 80px;
+      gap: 0 12px;
+      padding: 9px 24px;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .cue-row.illegal  { background: rgba(255,59,59,0.04); }
+    .cue-row.repaired { background: rgba(60,255,208,0.04); }
+
+    .cue-idx {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding-top: 2px;
+    }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--red);
+    }
+    .dot.ok       { background: var(--text-3); }
+    .dot.repaired { background: var(--mint); }
+
+    .cue-text {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+
+    .cue-val {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: right;
+    }
+    .cue-val.red   { color: var(--red); }
+    .cue-val.mint  { color: var(--mint); }
+    .cue-val.muted { color: var(--text-2); }
+    .cue-val small {
+      display: block;
+      font-weight: 400;
+      font-size: 9px;
+      color: var(--text-3);
+      letter-spacing: 0.5px;
+    }
+
+    .cue-check {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+    .cue-check span {
+      display: block;
+      color: var(--text-3);
+      font-size: 9px;
+    }
+
+    .no-violations {
+      padding: 40px 24px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      color: var(--text-3);
+      text-transform: uppercase;
+    }
+
+    /* ---- error ---- */
+    .error-box {
+      margin: 24px;
+      border: 1px solid var(--uv);
+      border-radius: 2px;
+      padding: 14px 18px;
+    }
+    .error-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--uv);
+      margin-bottom: 6px;
+    }
+    .error-body {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-2);
+    }
   </style>
 </head>
 <body>
-<header>
-  <h1>SIXTEEN SEVENTEEN</h1>
-  <span>Subtitle compliance, measured and repaired.</span>
-</header>
-<main>
-  <section>
-    <h2>Run a compliance pass</h2>
-    <div class="card">
-      <form id="run-form">
-        <div class="form-row">
-          <div>
-            <label>archive.org identifier (or leave blank to auto-pick)</label>
-            <input type="text" name="identifier" id="identifier" placeholder="e.g. vicki_1953" />
-          </div>
-          <div>
-            <label>Target platform</label>
-            <select name="platform" id="platform">
-              <option value="netflix">Netflix (TTSS)</option>
-              <option value="amazon">Amazon Prime Video</option>
-              <option value="bbc">BBC</option>
-              <option value="fcc">FCC (US broadcast)</option>
-            </select>
-          </div>
-          <div>
-            <button type="submit" id="run-btn">Run agent</button>
-          </div>
-        </div>
-      </form>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:16px;">
-        <div class="spinner" id="spinner" style="display:none"></div>
-        <div id="status-msg"></div>
-      </div>
+<div class="layout">
+
+  <header>
+    <span class="wordmark">SIXTEEN SEVENTEEN</span>
+    <span class="wordmark-tag">subtitle QC</span>
+  </header>
+
+  <aside>
+    <div>
+      <label class="field-label" for="film-select">Film</label>
+      <select id="film-select">
+        <option value="">-- known films --</option>
+        {film_options}
+      </select>
     </div>
-  </section>
+    <div>
+      <label class="field-label" for="identifier">Or identifier</label>
+      <input type="text" id="identifier" placeholder="e.g. vicki_1953" />
+    </div>
+    <div>
+      <label class="field-label" for="platform">Platform spec</label>
+      <select id="platform">
+        <option value="netflix">Netflix (TTSS)</option>
+        <option value="amazon">Amazon Prime Video</option>
+        <option value="bbc">BBC</option>
+        <option value="fcc">FCC (US broadcast)</option>
+      </select>
+    </div>
+    <button class="run-btn" id="run-btn">Run this track</button>
+    <div class="status-line" id="status-line"></div>
+    <div id="spec-area"></div>
+  </aside>
 
-  <div id="result"></div>
-
-  <section>
-    <h2>Known films with subtitle tracks</h2>
-    <div class="card">
-      <table class="cue-table">
+  <main id="main-area">
+    <div class="prerun">
+      <div class="section-label">Known tracks -- click to select</div>
+      <table class="known-tbl">
         <thead>
           <tr><th>Identifier</th><th>Title</th><th>Note</th></tr>
         </thead>
-        <tbody>
+        <tbody id="known-body">
           {known_rows}
         </tbody>
       </table>
     </div>
-  </section>
-</main>
+  </main>
 
+</div>
 <script>
-const form = document.getElementById('run-form');
-const btn  = document.getElementById('run-btn');
-const spin = document.getElementById('spinner');
-const msg  = document.getElementById('status-msg');
-const res  = document.getElementById('result');
+const filmSel  = document.getElementById('film-select');
+const identIn  = document.getElementById('identifier');
+const platSel  = document.getElementById('platform');
+const runBtn   = document.getElementById('run-btn');
+const statLine = document.getElementById('status-line');
+const mainArea = document.getElementById('main-area');
+const specArea = document.getElementById('spec-area');
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  btn.disabled = true;
-  spin.style.display = 'block';
-  msg.textContent = 'Fetching spec from Parallel Search…';
-  res.innerHTML = '';
+// click a known-film row to select it
+document.getElementById('known-body').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-id]');
+  if (!tr) return;
+  filmSel.value = tr.dataset.id;
+  identIn.value = '';
+});
 
-  const fd = new FormData(form);
-  const body = new URLSearchParams(fd);
+filmSel.addEventListener('change', () => { if (filmSel.value) identIn.value = ''; });
+identIn.addEventListener('input',  () => { if (identIn.value)  filmSel.value = ''; });
+
+function setStatus(html) { statLine.innerHTML = html; }
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+runBtn.addEventListener('click', async () => {
+  const id       = identIn.value.trim() || filmSel.value || '';
+  const platform = platSel.value;
+  runBtn.disabled = true;
+  specArea.innerHTML = '';
+  mainArea.innerHTML = '';
+  setStatus('<span class="spinner"></span>fetching spec');
 
   try {
-    msg.textContent = 'Downloading subtitle track from archive.org…';
-    const resp = await fetch('/run', { method: 'POST', body });
-    msg.textContent = 'Measuring, classifying, repairing…';
+    setStatus('<span class="spinner"></span>downloading subtitle track');
+    const resp = await fetch('/run', {
+      method: 'POST',
+      body: new URLSearchParams({ identifier: id, platform }),
+    });
+    setStatus('<span class="spinner"></span>measuring and repairing');
     const data = await resp.json();
     if (!resp.ok) {
-      res.innerHTML = `<div class="error-box"><b>Error:</b> ${data.detail || JSON.stringify(data)}</div>`;
+      mainArea.innerHTML = '<div class="error-box">'
+        + '<div class="error-label">Error</div>'
+        + '<div class="error-body">' + esc(data.detail || JSON.stringify(data)) + '</div>'
+        + '</div>';
     } else {
-      renderResult(data);
+      renderSheet(data);
     }
   } catch(err) {
-    res.innerHTML = `<div class="error-box"><b>Network error:</b> ${err.message}</div>`;
+    mainArea.innerHTML = '<div class="error-box">'
+      + '<div class="error-label">Network error</div>'
+      + '<div class="error-body">' + esc(err.message) + '</div>'
+      + '</div>';
   } finally {
-    btn.disabled = false;
-    spin.style.display = 'none';
-    msg.textContent = '';
+    runBtn.disabled = false;
+    setStatus('');
   }
 });
 
-function pct(n, total) {
-  return total ? (100 * n / total).toFixed(1) + '%' : '0%';
-}
-
-function renderResult(d) {
+function renderSheet(d) {
   const b = d.before, a = d.after, s = d.spec;
-  const imp = d.improvement;
+  const cls = d.classification || {};
 
-  const specBadge = s.is_cached
-    ? `<span class="badge cached">CACHED SPEC</span>`
-    : `<span class="badge live">LIVE SPEC</span>`;
+  // spec citation in sidebar
+  var badgeCls = s.is_cached ? 'cached' : 'live';
+  var badgeTxt = s.is_cached ? 'CACHED SPEC' : 'LIVE SPEC';
+  specArea.innerHTML = '<div class="spec-block">'
+    + '<span class="spec-badge ' + badgeCls + '">' + badgeTxt + '</span>'
+    + '<p>' + esc(s.source_label) + '<br>'
+    + '<a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">'
+    + esc(s.source_url) + '</a></p>'
+    + '</div>';
 
-  const overCpsBefore   = b.over_cps_count;
-  const overCpsAfter    = a.over_cps_count;
-  const underDurBefore  = b.under_duration_count;
-  const underDurAfter   = a.under_duration_count;
-  const lineCharsBefore = b.over_line_chars_count;
-  const lineCharsAfter  = a.over_line_chars_count;
+  // summary strip
+  var total      = b.cue_count;
+  var overBefore = b.over_cps_count;
+  var overAfter  = a.over_cps_count;
+  var durBefore  = b.under_duration_count;
+  var durAfter   = a.under_duration_count;
+  var changed    = d.cues_changed;
+  var maxCps     = s.max_cps;
 
-  const deltaRow = (label, before, after, total) => {
-    const cls = after < before ? 'delta-good' : 'delta-neutral';
-    return `<div class="check-row">
-      <span>${label}</span>
-      <span>
-        <span class="badge ${before > 0 ? 'fail' : 'pass'}">${before} (${pct(before, total)})</span>
-        &rarr;
-        <span class="badge ${after > 0 ? 'fail' : 'pass'}">${after} (${pct(after, total)})</span>
-        <span class="${cls}" style="margin-left:6px">&minus;${before - after}</span>
-      </span>
-    </div>`;
-  };
+  var strip = '<div class="summary-strip">'
+    + '<span class="sum-title">' + esc(d.film_title) + '</span>'
+    + '<span class="sum-stat"><span class="sum-n red">' + overBefore + '</span>'
+    + ' / <span class="sum-n">' + total + '</span>'
+    + ' over ' + maxCps + ' cps'
+    + ' &rarr; <span class="sum-n mint">' + overAfter + '</span></span>'
+    + '<span class="sum-sep">|</span>'
+    + '<span class="sum-stat"><span class="sum-n">' + durBefore + '</span>'
+    + ' under min dur &rarr; <span class="sum-n mint">' + durAfter + '</span></span>'
+    + '<span class="sum-sep">|</span>'
+    + '<span class="sum-stat"><span class="sum-n mint">' + changed + '</span> retimed</span>'
+    + '</div>';
 
-  const failingSample = (b.findings || []).slice(0, 40);
+  // cue rows from findings
+  var findings = b.findings || [];
+  var rowsHtml = '';
 
-  const cueRows = failingSample.map(f => `<tr>
-    <td>${f.cue_index}</td>
-    <td>${f.check}</td>
-    <td>${typeof f.value === 'number' ? f.value.toFixed(2) : f.value}</td>
-    <td>${f.threshold}</td>
-    <td>${f.unit}</td>
-    <td>${(d.classification[String(f.cue_index)] || '—')}</td>
-    <td title="${f.text_preview}">${f.text_preview.slice(0, 48)}</td>
-  </tr>`).join('');
+  if (findings.length === 0) {
+    rowsHtml = '<div class="no-violations">No violations found</div>';
+  } else {
+    var header = '<div class="sheet-header">'
+      + '<span>#</span><span>TEXT</span>'
+      + '<span style="text-align:right">MEASURED</span><span>CHECK</span>'
+      + '</div>';
 
-  res.innerHTML = `
-    <section>
-      <h2>Results: ${d.film_title}</h2>
-      <div class="improvement-banner">
-        <strong>${d.cues_changed}</strong> cues retimed &bull;
-        <strong>${d.auto_fixable_count}</strong> auto-fixable &bull;
-        <strong>${d.needs_review_count}</strong> need editorial review &bull;
-        Spec: ${s.platform} ${specBadge}
-      </div>
+    var rows = findings.map(function(f) {
+      var classification = cls[String(f.cue_index)] || '';
+      var repaired = classification === 'auto_fixable';
+      var rowCls   = repaired ? 'repaired' : 'illegal';
+      var dotCls   = repaired ? 'repaired' : '';
+      var valCls   = repaired ? 'mint' : 'red';
+      var val      = typeof f.value === 'number' ? f.value.toFixed(2) : String(f.value);
+      var thresh   = typeof f.threshold === 'number'
+        ? f.threshold.toFixed(f.check === 'min_duration' ? 3 : 0)
+        : String(f.threshold);
+      var checkLbl = f.check === 'reading_speed' ? 'CPS'
+                   : f.check === 'min_duration'  ? 'DUR'
+                   : f.check === 'line_length'   ? 'LEN'
+                   : f.check.toUpperCase().slice(0, 4);
+      var idx = String(f.cue_index);
+      while (idx.length < 4) idx = '0' + idx;
 
-      <div class="stats-grid">
-        <div class="stat">
-          <div class="value">${b.cue_count}</div>
-          <div class="label">Total cues</div>
-        </div>
-        <div class="stat">
-          <div class="value">${overCpsBefore}</div>
-          <div class="label">Over reading speed (before)</div>
-        </div>
-        <div class="stat">
-          <div class="value">${overCpsAfter}</div>
-          <div class="label">Over reading speed (after)</div>
-        </div>
-        <div class="stat">
-          <div class="value">${s.max_cps}</div>
-          <div class="label">Max chars/sec (${s.platform})</div>
-        </div>
-      </div>
+      return '<div class="cue-row ' + rowCls + '">'
+        + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
+        + '<div class="cue-text">' + esc(f.text_preview || '') + '</div>'
+        + '<div class="cue-val ' + valCls + '">' + val
+        + '<small>' + esc(f.unit) + '</small></div>'
+        + '<div class="cue-check">' + checkLbl
+        + '<span>lim ' + thresh + '</span></div>'
+        + '</div>';
+    }).join('');
 
-      <div class="before-after">
-        <div class="panel">
-          <h3>BEFORE REPAIR</h3>
-          ${deltaRow('Reading speed > ' + s.max_cps + ' cps', overCpsBefore, overCpsAfter, b.cue_count)}
-          ${deltaRow('Duration < ' + s.min_duration_s.toFixed(3) + 's', underDurBefore, underDurAfter, b.cue_count)}
-          ${deltaRow('Line length > ' + s.max_line_chars + ' chars', lineCharsBefore, lineCharsAfter, b.cue_count)}
-        </div>
-        <div class="panel">
-          <h3>AFTER REPAIR</h3>
-          <div class="check-row"><span>Reading speed violations</span>
-            <span class="badge ${overCpsAfter > 0 ? 'fail' : 'pass'}">${overCpsAfter > 0 ? overCpsAfter + ' FAIL' : 'PASS'}</span></div>
-          <div class="check-row"><span>Duration violations</span>
-            <span class="badge ${underDurAfter > 0 ? 'fail' : 'pass'}">${underDurAfter > 0 ? underDurAfter + ' FAIL' : 'PASS'}</span></div>
-          <div class="check-row"><span>Line length violations</span>
-            <span class="badge ${lineCharsAfter > 0 ? 'warn' : 'pass'}">${lineCharsAfter > 0 ? lineCharsAfter + ' WARN (editorial)' : 'PASS'}</span></div>
-        </div>
-      </div>
+    rowsHtml = header + rows;
+  }
 
-      <div class="spec-citation">
-        Spec fetched at runtime from: <a href="${s.source_url}" target="_blank" rel="noopener">${s.source_url}</a><br/>
-        ${s.source_label}
-      </div>
-    </section>
-
-    <section>
-      <h2>Failing cues (first 40 of ${b.findings ? b.findings.length : 0})</h2>
-      <div class="card" style="padding:0;overflow-x:auto;">
-        <table class="cue-table">
-          <thead>
-            <tr><th>#</th><th>Check</th><th>Value</th><th>Threshold</th><th>Unit</th><th>Classification</th><th>Text preview</th></tr>
-          </thead>
-          <tbody>${cueRows}</tbody>
-        </table>
-      </div>
-    </section>
-
-    <section>
-      <h2>Film metadata</h2>
-      <div class="card">
-        <div class="check-row"><span>Title</span><span>${d.film_title}</span></div>
-        <div class="check-row"><span>Archive.org identifier</span><span><a href="https://archive.org/details/${d.film_identifier}" target="_blank">${d.film_identifier}</a></span></div>
-        <div class="check-row"><span>Subtitle file</span><span><a href="${d.subtitle_url}" target="_blank">${d.subtitle_filename}</a></span></div>
-        <div class="check-row"><span>Total cues measured</span><span>${b.cue_count}</span></div>
-      </div>
-    </section>
-  `;
+  mainArea.innerHTML = strip + rowsHtml;
 }
 </script>
 </body>
@@ -428,11 +609,18 @@ function renderResult(d) {
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    known_rows = "\n".join(
-        f'<tr><td>{f["identifier"]}</td><td>{f["title"]}</td><td>{f["note"]}</td></tr>'
+    film_options = "\n".join(
+        f'<option value="{f["identifier"]}">{f["title"]}</option>'
         for f in KNOWN_FILMS
     )
-    return HTML.replace("{known_rows}", known_rows)
+    known_rows = "\n".join(
+        f'<tr data-id="{f["identifier"]}"><td>{f["identifier"]}</td>'
+        f'<td>{f["title"]}</td><td>{f["note"]}</td></tr>'
+        for f in KNOWN_FILMS
+    )
+    return (HTML
+            .replace("{film_options}", film_options)
+            .replace("{known_rows}", known_rows))
 
 
 @app.post("/run")
