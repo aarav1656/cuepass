@@ -50,199 +50,166 @@ HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SIXTEEN SEVENTEEN — Subtitle Compliance</title>
+  <title>SIXTEEN SEVENTEEN: subtitle compliance, measured and repaired</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    /* Tokens from DESIGN.md (ElevenLabs design system), used verbatim.
+       Chosen deliberately: this product is about subtitles, which are typography
+       under a legal reading-speed limit. Judging cue text on a near-black
+       dashboard is the wrong surface. An off-white editorial page renders the
+       thing being measured the way a reader actually meets it. Waldenburg is
+       licensed, so the display face is EB Garamond, the substitute the design
+       file itself names. Tokens live here once, never inline on elements. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0d0d0f;
-      --surface: #16181c;
-      --border: #2a2d34;
-      --accent: #4f8ef7;
-      --accent-dim: #2a4a8a;
-      --pass: #2ea84f;
-      --fail: #d94848;
-      --warn: #c8962e;
-      --text: #d8dce8;
-      --muted: #7a8094;
-      --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --primary: #292524; --primary-active: #0c0a09;
+      --ink: #0c0a09; --body: #4e4e4e; --body-strong: #292524;
+      --muted: #777169; --muted-soft: #a8a29e;
+      --hairline: #e7e5e4; --hairline-soft: #f0efed; --hairline-strong: #d6d3d1;
+      --canvas: #f5f5f5; --canvas-soft: #fafafa; --canvas-deep: #0c0a09;
+      --surface-card: #ffffff; --surface-strong: #f0efed;
+      --surface-dark: #0c0a09; --surface-dark-elevated: #1c1917;
+      --on-primary: #ffffff; --on-dark: #ffffff; --on-dark-soft: #a8a29e;
+      --error: #dc2626; --success: #16a34a; --warn: #b45309;
+
+      --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-pill: 9999px;
+      --s-xs: 8px; --s-sm: 12px; --s-base: 16px; --s-md: 20px;
+      --s-lg: 24px; --s-xl: 32px; --s-xxl: 48px; --s-section: 96px;
+
+      --display: 'EB Garamond', 'Times New Roman', serif;
+      --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
     }
+
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-      font-size: 15px;
-      line-height: 1.6;
-      min-height: 100vh;
+      background: var(--canvas); color: var(--body);
+      font: 400 16px/1.5 var(--sans); letter-spacing: 0.16px;
+      -webkit-font-smoothing: antialiased;
     }
-    header {
-      border-bottom: 1px solid var(--border);
-      padding: 24px 32px;
-      display: flex;
-      align-items: baseline;
-      gap: 16px;
+
+    /* Display type is the licensed-serif tier: light weight, negative tracking,
+       never bold. This system whispers; it does not shout. */
+    h1 {
+      font-family: var(--display); font-size: 48px; font-weight: 300;
+      line-height: 1.08; letter-spacing: -0.96px; color: var(--ink);
     }
-    header h1 {
-      font-size: 20px;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-      color: #fff;
-    }
-    header span {
-      font-size: 13px;
-      color: var(--muted);
-    }
-    main { max-width: 960px; margin: 0 auto; padding: 32px; }
-    section { margin-bottom: 40px; }
     h2 {
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 16px;
+      font-family: var(--display); font-size: 32px; font-weight: 300;
+      line-height: 1.13; letter-spacing: -0.32px; color: var(--ink);
     }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px 24px;
+    .eyebrow {
+      font: 600 12px/1.4 var(--sans); letter-spacing: 0.96px;
+      text-transform: uppercase; color: var(--muted);
     }
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr auto;
-      gap: 12px;
-      align-items: end;
+    .lede { font-size: 18px; line-height: 1.55; color: var(--body); max-width: 64ch; }
+
+    header {
+      border-bottom: 1px solid var(--hairline);
+      padding: var(--s-xl) var(--s-xl) var(--s-lg);
+      background: var(--canvas-soft);
     }
-    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
-    input[type=text], select {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 9px 12px;
-      font-size: 14px;
-      outline: none;
+    main { max-width: 1120px; margin: 0 auto; padding: var(--s-xl); }
+
+    /* Cards are white on the off-white canvas, separated by a hairline rather
+       than a shadow. Print-page logic, not dashboard-panel logic. */
+    .card, .panel {
+      background: var(--surface-card); border: 1px solid var(--hairline);
+      border-radius: var(--r-lg); padding: var(--s-lg);
     }
-    input[type=text]:focus, select:focus { border-color: var(--accent); }
-    button[type=submit] {
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 10px 20px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
+    .card + .card, .panel + .panel { margin-top: var(--s-lg); }
+
+    button {
+      background: var(--primary); color: var(--on-primary); border: 0;
+      border-radius: var(--r-pill); padding: 12px 24px; height: 44px;
+      font: 500 15px/1 var(--sans); cursor: pointer;
+      transition: background .15s ease;
     }
-    button[type=submit]:hover { opacity: 0.88; }
-    button[type=submit]:disabled { opacity: 0.4; cursor: default; }
-    .badge {
-      display: inline-block;
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
+    button:hover:not(:disabled) { background: var(--primary-active); }
+    button:disabled { background: var(--hairline-strong); color: var(--muted); cursor: default; }
+
+    input, select {
+      background: var(--surface-card); border: 1px solid var(--hairline-strong);
+      border-radius: var(--r-md); padding: 11px 14px;
+      font: 400 15px/1 var(--sans); color: var(--ink);
     }
-    .pass  { background: #162d1e; color: var(--pass); border: 1px solid #1e4a2a; }
-    .fail  { background: #2d1616; color: var(--fail); border: 1px solid #4a1e1e; }
-    .warn  { background: #2d2516; color: var(--warn); border: 1px solid #4a3a1e; }
-    .cached { background: #252016; color: #c8962e; border: 1px solid #4a3a1e; font-size:10px; }
-    .live   { background: #162525; color: #2ea8a8; border: 1px solid #1e4a4a; font-size:10px; }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 20px;
-    }
+    input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+    /* Numbers stay monospaced so cue timings and character counts align. */
     .stat {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 14px 16px;
+      font-family: var(--display); font-size: 48px; font-weight: 300;
+      line-height: 1.08; letter-spacing: -0.96px; color: var(--ink);
     }
-    .stat .value {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: #fff;
-      font-family: var(--mono);
+    .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .pass, .delta-good { color: var(--success); font-weight: 500; }
+    .fail { color: var(--error); font-weight: 500; }
+    .warn { color: var(--warn); font-weight: 500; }
+    .delta-neutral { color: var(--muted); }
+
+    table, .cue-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th {
+      text-align: left; font: 600 12px/1.4 var(--sans); letter-spacing: 0.96px;
+      text-transform: uppercase; color: var(--muted);
+      padding: 10px 8px; border-bottom: 1px solid var(--hairline-strong);
     }
-    .stat .label { font-size: 11px; color: var(--muted); margin-top: 4px; }
-    .before-after {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
+    td {
+      padding: 11px 8px; border-bottom: 1px solid var(--hairline);
+      vertical-align: top; color: var(--body);
     }
-    .panel { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
-    .panel h3 { font-size: 12px; color: var(--muted); margin-bottom: 12px; letter-spacing: 0.06em; }
-    .check-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--border);
-      font-size: 13px;
+    tr:last-child td { border-bottom: 0; }
+
+    /* Cue text is the subject of the product, so it is set as reading text at a
+       readable size, not squeezed into a data cell. */
+    .cue-text { font-family: var(--display); font-size: 17px; line-height: 1.45; color: var(--ink); }
+
+    .badge {
+      display: inline-block; font: 600 12px/1 var(--sans); letter-spacing: 0.96px;
+      text-transform: uppercase; padding: 6px 10px; border-radius: var(--r-pill);
+      background: var(--surface-strong); color: var(--body-strong);
     }
-    .check-row:last-child { border-bottom: none; }
+    .badge.live { background: var(--ink); color: var(--on-dark); }
+    .badge.cached { background: var(--surface-strong); color: var(--muted); }
+
     .spec-citation {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 12px;
-    }
-    .spec-citation a { color: var(--accent); text-decoration: none; }
-    .spec-citation a:hover { text-decoration: underline; }
-    .cue-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
-    .cue-table th {
-      text-align: left;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--border);
-      color: var(--muted);
-      font-weight: 500;
-    }
-    .cue-table td {
-      padding: 5px 10px;
-      border-bottom: 1px solid #1a1c22;
-      vertical-align: top;
-      max-width: 320px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 14px; color: var(--muted); border-left: 2px solid var(--hairline-strong);
+      padding-left: var(--s-sm); margin-top: var(--s-xs);
     }
     .error-box {
-      background: #2d1616;
-      border: 1px solid var(--fail);
-      border-radius: 6px;
-      padding: 16px;
-      color: #f07070;
-      font-size: 13px;
+      background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+      border-radius: var(--r-md); padding: var(--s-base); font-size: 14px;
     }
+    .improvement-banner {
+      background: var(--surface-dark); color: var(--on-dark);
+      border-radius: var(--r-lg); padding: var(--s-lg); margin-top: var(--s-lg);
+    }
+    .improvement-banner .stat { color: var(--on-dark); }
+
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: var(--s-lg); align-items: start;
+    }
+    .form-row { display: flex; gap: var(--s-sm); flex-wrap: wrap; align-items: center; }
+    .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-lg); }
+    @media (max-width: 720px) { .before-after { grid-template-columns: 1fr; } }
+
+    .check-row {
+      display: flex; justify-content: space-between; gap: var(--s-base);
+      padding: 12px 0; border-bottom: 1px solid var(--hairline);
+    }
+    .check-row:last-child { border-bottom: 0; }
+
     .spinner {
-      display: none;
-      width: 20px; height: 20px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin-left: 12px;
+      width: 16px; height: 16px; border: 2px solid var(--hairline-strong);
+      border-top-color: var(--ink); border-radius: var(--r-pill);
+      display: inline-block; animation: spin .7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    #status-msg { font-size: 13px; color: var(--muted); margin-top: 16px; min-height: 20px; }
-    #result { margin-top: 32px; }
-    .delta-good { color: var(--pass); font-weight: 700; }
-    .delta-neutral { color: var(--muted); }
-    .improvement-banner {
-      background: #0d2010;
-      border: 1px solid #1e5030;
-      border-radius: 6px;
-      padding: 14px 20px;
-      font-size: 13px;
-      margin-bottom: 20px;
-    }
-    .improvement-banner strong { color: var(--pass); }
-    a { color: var(--accent); }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+    a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover { color: var(--muted); }
+    code { font-family: var(--mono); font-size: 13px; color: var(--body-strong); }
   </style>
 </head>
 <body>
@@ -274,8 +241,8 @@ HTML = """<!DOCTYPE html>
           </div>
         </div>
       </form>
-      <div style="display:flex;align-items:center;margin-top:12px;">
-        <div class="spinner" id="spinner"></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:16px;">
+        <div class="spinner" id="spinner" style="display:none"></div>
         <div id="status-msg"></div>
       </div>
     </div>
