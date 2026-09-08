@@ -1,504 +1,339 @@
----
-version: alpha
-name: ElevenLabs-design-analysis
-description: A voice-AI brand whose marketing surfaces read like a quietly editorial print magazine. The base canvas is off-white (`#f5f5f5`) holding warm near-black ink (`#292524`); the brand voltage is photographic, not chromatic — soft pastel atmospheric gradient orbs (mint → peach → lavender → sky) drift through the page as the only "color" moments. Display runs Waldenburg Light at weight 300 — the editorial signature. Inter carries body, navigation, captions. CTAs are subtle: a near-black ink pill is the primary, a transparent outline is the secondary. The brand trusts atmospheric photography and modest type weights to do all of the brand work; there is no neon accent, no saturated CTA color, no developer-tools dark canvas.
+# Design System Inspired by The Verge
 
-colors:
-  primary: "#292524"
-  primary-active: "#0c0a09"
-  ink: "#0c0a09"
-  body: "#4e4e4e"
-  body-strong: "#292524"
-  muted: "#777169"
-  muted-soft: "#a8a29e"
-  hairline: "#e7e5e4"
-  hairline-soft: "#f0efed"
-  hairline-strong: "#d6d3d1"
-  canvas: "#f5f5f5"
-  canvas-soft: "#fafafa"
-  canvas-deep: "#0c0a09"
-  surface-card: "#ffffff"
-  surface-strong: "#f0efed"
-  surface-dark: "#0c0a09"
-  surface-dark-elevated: "#1c1917"
-  on-primary: "#ffffff"
-  on-dark: "#ffffff"
-  on-dark-soft: "#a8a29e"
-  gradient-mint: "#a7e5d3"
-  gradient-peach: "#f4c5a8"
-  gradient-lavender: "#c8b8e0"
-  gradient-sky: "#a8c8e8"
-  gradient-rose: "#e8b8c4"
-  semantic-error: "#dc2626"
-  semantic-success: "#16a34a"
+## 1. Visual Theme & Atmosphere
 
-typography:
-  display-mega:
-    fontFamily: "'Waldenburg', 'Times New Roman', serif"
-    fontSize: 64px
-    fontWeight: 300
-    lineHeight: 1.05
-    letterSpacing: -1.92px
-  display-xl:
-    fontFamily: "'Waldenburg', serif"
-    fontSize: 48px
-    fontWeight: 300
-    lineHeight: 1.08
-    letterSpacing: -0.96px
-  display-lg:
-    fontFamily: "'Waldenburg', serif"
-    fontSize: 36px
-    fontWeight: 300
-    lineHeight: 1.17
-    letterSpacing: -0.36px
-  display-md:
-    fontFamily: "'Waldenburg', serif"
-    fontSize: 32px
-    fontWeight: 300
-    lineHeight: 1.13
-    letterSpacing: -0.32px
-  display-sm:
-    fontFamily: "'Waldenburg', serif"
-    fontSize: 24px
-    fontWeight: 300
-    lineHeight: 1.2
-    letterSpacing: 0
-  title-md:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 20px
-    fontWeight: 500
-    lineHeight: 1.35
-    letterSpacing: 0
-  title-sm:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 18px
-    fontWeight: 500
-    lineHeight: 1.44
-    letterSpacing: 0.18px
-  body-md:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 16px
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: 0.16px
-  body-strong:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 16px
-    fontWeight: 500
-    lineHeight: 1.5
-    letterSpacing: 0.16px
-  body-sm:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 15px
-    fontWeight: 400
-    lineHeight: 1.47
-    letterSpacing: 0.15px
-  caption:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 14px
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: 0
-  caption-uppercase:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 12px
-    fontWeight: 600
-    lineHeight: 1.4
-    letterSpacing: 0.96px
-    textTransform: uppercase
-  button:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 15px
-    fontWeight: 500
-    lineHeight: 1.0
-    letterSpacing: 0
-  nav-link:
-    fontFamily: "'Inter', sans-serif"
-    fontSize: 15px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
+The Verge's 2024 redesign feels like somebody wired a Condé Nast magazine to a chiptune soundboard. The canvas is almost-black (`#131313`), the headlines are built from a brutally heavy display face (Manuka) that runs up to 107px, and the whole page is peppered with acid-mint `#3cffd0` and ultraviolet `#5200ff` that behave less like brand colors and more like hazard tape. Story tiles are not quiet gray cards — they're saturated, full-bleed color blocks (yellow, pink, orange, blue, purple) that feel like pasted-up rave flyers arranged into a timeline. The mood is "developer console meets club night meets tech tabloid": serious enough to cover a congressional hearing, loud enough to review a synthesizer.
 
-rounded:
-  none: 0px
-  xs: 4px
-  sm: 6px
-  md: 8px
-  lg: 12px
-  xl: 16px
-  xxl: 24px
-  pill: 9999px
-  full: 9999px
+What makes this system unmistakable is the **StoryStream** timeline: a vertical feed where every post is a rounded rectangle — often 20–40px radius — filled edge-to-edge with color, framed by a thin border, and marked by a mono-uppercase timestamp on its left rail. Stories don't float on a grid; they stack on a dashed vertical rule like commits in a git log. Above that, a massive **"The Verge" wordmark** dominates the masthead in Manuka at hero scale, letting the reader know before any headline loads that this is editorial territory, not a template.
 
-spacing:
-  xxs: 4px
-  xs: 8px
-  sm: 12px
-  base: 16px
-  md: 20px
-  lg: 24px
-  xl: 32px
-  xxl: 48px
-  section: 96px
-
-components:
-  top-nav:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.nav-link}"
-    height: 64px
-  button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.on-primary}"
-    typography: "{typography.button}"
-    rounded: "{rounded.pill}"
-    padding: 10px 20px
-    height: 40px
-  button-primary-active:
-    backgroundColor: "{colors.primary-active}"
-    textColor: "{colors.on-primary}"
-    rounded: "{rounded.pill}"
-  button-outline:
-    backgroundColor: transparent
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.pill}"
-    padding: 9px 19px
-    height: 40px
-  button-tertiary-text:
-    backgroundColor: transparent
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-  hero-band:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.display-mega}"
-    padding: 96px
-  gradient-orb-card:
-    backgroundColor: "{colors.canvas-soft}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.xxl}"
-    padding: 32px
-  feature-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.title-md}"
-    rounded: "{rounded.xl}"
-    padding: 24px
-  product-card-stack:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.xl}"
-    padding: 0
-  voice-row:
-    backgroundColor: transparent
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    padding: 12px 0
-  voice-icon-circular:
-    backgroundColor: "{colors.surface-strong}"
-    rounded: "{rounded.full}"
-    size: 32px
-  pricing-tier-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.xl}"
-    padding: 32px
-  pricing-tier-featured:
-    backgroundColor: "{colors.surface-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.xl}"
-    padding: 32px
-  text-input:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.md}"
-    padding: 12px 16px
-    height: 44px
-  badge-pill:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.ink}"
-    typography: "{typography.caption-uppercase}"
-    rounded: "{rounded.pill}"
-    padding: 4px 10px
-  cta-band:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.display-lg}"
-    padding: 96px
-  testimonial-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.body}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.xl}"
-    padding: 32px
-  audio-waveform-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.xl}"
-    padding: 24px
-  footer:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.body}"
-    typography: "{typography.body-sm}"
-    padding: 64px 48px
-  footer-link:
-    backgroundColor: transparent
-    textColor: "{colors.body}"
-    typography: "{typography.body-sm}"
----
-
-## Overview
-
-ElevenLabs reads like a quietly editorial print magazine that happens to be a voice-AI product. The base canvas is off-white `{colors.canvas}` (#f5f5f5) holding warm near-black ink `{colors.ink}` (#0c0a09). The brand voltage is **photographic, not chromatic**: soft pastel atmospheric gradient orbs (mint, peach, lavender, sky, rose) drift through the page as the only "color" moments. There is no neon accent, no saturated CTA color, no dark-canvas dev-tools atmosphere.
-
-Type pairs **Waldenburg Light** (custom serif at weight 300) for display with **Inter** for body, navigation, captions. The display weight at 300 is the editorial signature — never bold, never heavy.
-
-CTAs are subtle: a near-black ink pill (`{component.button-primary}`) is the primary, a transparent outline (`{component.button-outline}`) is the secondary. The brand trusts atmospheric photography and modest type weights to carry brand work.
+There is no "light mode" on the homepage — the dark canvas is the product, and the only time the palette inverts is when a single story tile takes a mint or yellow fill. The depth is almost entirely flat: **hairline 1px borders** (`#ffffff`, `#3cffd0`, or `#5200ff`) do the work that shadows would do on a Material-flavored site. Every container is either `#131313` with a 1px outline, a fully saturated accent block, or a slate-gray `#2d2d2d` secondary surface.
 
 **Key Characteristics:**
-- Off-white canvas, warm near-black ink. No saturated CTA color.
-- Single primary action: ink pill at `{rounded.pill}`. Atmospheric gradients carry visual brand voltage.
-- Display runs Waldenburg Light at weight 300 — editorial magazine voice.
-- Body runs Inter at 400 with subtle letter-spacing (+0.15-0.18px).
-- Pastel gradient orbs (5 tokens: mint, peach, lavender, sky, rose) used as atmospheric brand decoration only.
-- Soft pill geometry (`{rounded.pill}` for CTAs, `{rounded.xl}` for cards).
-- 96px section rhythm.
+- Near-black editorial canvas (`#131313`) as the default surface — no light mode on the homepage
+- Acid-mint `#3cffd0` + ultraviolet `#5200ff` as hazard-tape accents, never quiet background wash
+- Massive Manuka display headlines up to 107px — the single loudest type move in mainstream tech media
+- Rounded pill-card everything: 20/24/30/40px corner radii, never square
+- Fully saturated color-block story tiles (mint, purple, yellow, pink, orange, electric blue) on a dark page
+- Timeline "StoryStream" feed with mono uppercase timestamps rather than a traditional magazine grid
+- Flat depth — 1px borders in white, mint, purple do the work that shadows would do elsewhere
 
-## Colors
+## 2. Color Palette & Roles
 
-### Brand & Accent
-- **Ink Primary** (`{colors.primary}` — #292524): The primary action color — warm near-black pill. Used scarcely.
-- **Ink Primary Active** (`{colors.primary-active}` — #0c0a09): Press state.
+### Primary (Brand Hazards)
+- **Jelly Mint** (`#3cffd0`): The Verge's signature acid-mint accent. Used as CTA button fill, link underlines, active tab borders, and high-attention story-tile backgrounds. Treat it as the visual equivalent of neon safety paint — applied sparingly to the most important element on screen.
+- **Verge Ultraviolet** (`#5200ff`): The complementary brand hazard. Used for secondary color-block tiles, promotional spans, and the occasional outlined button. Often applied at 0.9 alpha to soften its cathode intensity.
 
-### Surface
-- **Canvas** (`{colors.canvas}` — #f5f5f5): Off-white page floor.
-- **Canvas Soft** (`{colors.canvas-soft}` — #fafafa): Lighter band for subtle alternating sections.
-- **Canvas Deep** (`{colors.canvas-deep}` — #0c0a09): Same as ink — used for the rare dark-mode hero (Agents page).
-- **Surface Card** (`{colors.surface-card}` — #ffffff): Pure white card.
-- **Surface Strong** (`{colors.surface-strong}` — #f0efed): Badges, voice-icon plates.
-- **Surface Dark** (`{colors.surface-dark}` — #0c0a09): Dark hero/CTA band canvas.
-- **Surface Dark Elevated** (`{colors.surface-dark-elevated}` — #1c1917): Cards on dark canvas.
+### Secondary & Accent
+- **Console Mint Border** (`#309875`): A darker variant of the jelly mint used on card outlines and button borders where pure mint would over-saturate.
+- **Deep Link Blue** (`#3860be`): The link *hover* color — the one moment blue appears on the site. It replaces mint/white/black on hover across every link style.
+- **Focus Cyan** (`#1eaedb`): Reserved for button focus rings. Never shown outside a keyboard-focus state.
+- **Purple Rule** (`#3d00bf`): A darker ultraviolet variant used as the vertical border on StoryStream `<li>` items.
 
-### Hairlines
-- **Hairline** (`{colors.hairline}` — #e7e5e4): Default 1px divider.
-- **Hairline Soft** (`{colors.hairline-soft}` — #f0efed): Lighter divider.
-- **Hairline Strong** (`{colors.hairline-strong}` — #d6d3d1): Stronger panel outline.
+### Surface & Background
+- **Canvas Black** (`#131313`): The default dark surface for the entire homepage. Almost-but-not-quite pure black — has just enough warmth to feel like a printed newsprint negative rather than an OLED void.
+- **Surface Slate** (`#2d2d2d`): Secondary card background, used when a story tile doesn't need to be a saturated color block.
+- **Image Frame** (`#313131`): The 1px border that wraps inline imagery.
+- **Hazard White** (`#ffffff`): Used as story-tile fill, button border, and primary text. When white appears as a large block, it's an editorial decision — a "spotlight" on that tile.
+- **Absolute Black** (`#000000`): Reserved for text on the mint/yellow/white tiles — the only place it appears.
 
-### Text
-- **Ink** (`{colors.ink}` — #0c0a09): Display, primary text.
-- **Body** (`{colors.body}` — #4e4e4e): Default running-text.
-- **Body Strong** (`{colors.body-strong}` — #292524): Same as primary — emphasis.
-- **Muted** (`{colors.muted}` — #777169): Sub-titles.
-- **Muted Soft** (`{colors.muted-soft}` — #a8a29e): Disabled text.
-- **On Primary** (`{colors.on-primary}` — #ffffff): White text on ink pill.
-- **On Dark** (`{colors.on-dark}` — #ffffff): White text on dark hero.
-- **On Dark Soft** (`{colors.on-dark-soft}` — #a8a29e): Muted off-white on dark.
+### Neutrals & Text
+- **Primary Text** (`#ffffff`): Headlines and display text on the canvas.
+- **Secondary Text** (`#949494`): Bylines, timestamps, photo credits. The mid-gray that anchors the metadata layer.
+- **Muted Text** (`#e9e9e9`): Button text on dark slate buttons. Slightly off-white to reduce screen glare.
+- **Inverted Text** (`#131313`): Used only on accent tiles (mint, yellow, white) to keep contrast legible.
 
-### Atmospheric Gradient Stops (signature)
-- **Gradient Mint** (`{colors.gradient-mint}` — #a7e5d3): Mint green orb.
-- **Gradient Peach** (`{colors.gradient-peach}` — #f4c5a8): Peach orb.
-- **Gradient Lavender** (`{colors.gradient-lavender}` — #c8b8e0): Lavender orb.
-- **Gradient Sky** (`{colors.gradient-sky}` — #a8c8e8): Sky-blue orb.
-- **Gradient Rose** (`{colors.gradient-rose}` — #e8b8c4): Rose orb.
+### Semantic & Accent
+- **Focus Ring** (`#1eaedb`): Keyboard focus only.
+- **Overlay Black** (`rgba(0, 0, 0, 0.33)`): Subtle 1px ring used as the quiet shadow alternative on stacked cards.
+- **Dim Gray** (`#8c8c8c`): Active/pressed button background — the "pressed down" state.
 
-These appear ONLY as soft radial-gradient atmospheric orbs inside `{component.gradient-orb-card}` and as background atmospheric blooms behind hero copy. Never as button fills, never as text colors.
+### Gradient System
+The Verge uses **zero decorative gradients**. The only gradient-like treatment is the transition from a saturated accent story tile (mint/purple/yellow) back to the `#131313` canvas between rows. Color is applied in solid blocks, not as washes. This is a deliberate choice — the site's hazard-tape visual identity would dissolve if anything faded.
 
-### Semantic
-- **Success** (`{colors.semantic-success}` — #16a34a): Confirmation.
-- **Error** (`{colors.semantic-error}` — #dc2626): Validation errors.
-
-## Typography
+## 3. Typography Rules
 
 ### Font Family
-**Waldenburg Light** is the licensed display serif at weight 300. **Inter** carries body, navigation, captions, and buttons. Fallback: `'Times New Roman', serif` for Waldenburg, `sans-serif` for Inter.
+- **Manuka** (Klim Type Foundry) — fallback: Impact, Helvetica. The signature display face for The Verge wordmark and feature headlines. A heavy-weight (900) industrial sans-serif with a condensed, almost-athletic stance. Runs at 60–107px on the homepage, never smaller.
+- **PolySans** (PanGram Pangram / Nikolas Wrobel) — fallback: Helvetica, Arial. The UI and secondary headline workhorse. Covers weights 300 / 500 / 700 across the system — everything from kicker captions to body decks.
+- **PolySans Mono** — fallback: Courier New, Courier. The monospaced sibling, used exclusively for ALL-CAPS labels: kickers, timestamps, category tags, button labels. This mono-uppercase usage is the second-most-identifiable Verge detail after Manuka.
+- **FK Roman Standard** (Florian Karsten) — fallback: Georgia. A serif used sparingly for specific body/caption treatments (article excerpts, certain review pulls). Adds a "print-magazine" counterpoint to the PolySans stack.
+- **Roboto** — fallback: `-apple-system`, `system-ui`. Utility UI font for widgets and legacy modules.
 
 ### Hierarchy
 
-| Token | Size | Weight | Line Height | Letter Spacing | Use |
-|---|---|---|---|---|---|
-| `{typography.display-mega}` | 64px | 300 | 1.05 | -1.92px | Homepage hero h1 |
-| `{typography.display-xl}` | 48px | 300 | 1.08 | -0.96px | Subsidiary heroes |
-| `{typography.display-lg}` | 36px | 300 | 1.17 | -0.36px | Section heads |
-| `{typography.display-md}` | 32px | 300 | 1.13 | -0.32px | Sub-section heads |
-| `{typography.display-sm}` | 24px | 300 | 1.2 | 0 | Card group titles |
-| `{typography.title-md}` | 20px | 500 | 1.35 | 0 | Component titles — Inter |
-| `{typography.title-sm}` | 18px | 500 | 1.44 | 0.18px | List labels |
-| `{typography.body-md}` | 16px | 400 | 1.5 | 0.16px | Default body — Inter |
-| `{typography.body-strong}` | 16px | 500 | 1.5 | 0.16px | Emphasized body |
-| `{typography.body-sm}` | 15px | 400 | 1.47 | 0.15px | Footer body |
-| `{typography.caption}` | 14px | 400 | 1.5 | 0 | Photo captions |
-| `{typography.caption-uppercase}` | 12px | 600 | 1.4 | 0.96px | Section labels, badges |
-| `{typography.button}` | 15px | 500 | 1.0 | 0 | CTA pill |
-| `{typography.nav-link}` | 15px | 500 | 1.4 | 0 | Top-nav menu |
+| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |
+|---|---|---|---|---|---|---|
+| Hero Wordmark / Display | Manuka | 107px / 6.69rem | 900 | 0.80 | 1.07px | The top-of-page "The Verge" logo and feature headlines |
+| Secondary Display | Manuka | 90px / 5.63rem | 900 | 0.80 | — | Section-level feature headlines |
+| Tertiary Display | Manuka | 60px / 3.75rem | 900 | 0.80 | — | Inline feature callouts |
+| Large Headline | PolySans | 34px / 2.13rem | 700 | 1.00 | — | Section and module headlines |
+| Heading Wide | PolySans | 32px / 2.00rem | 400 | 1.10 | 0.32px | Sub-heroes, promotional units |
+| Heading Medium | PolySans | 24px / 1.50rem | 700 | 1.00 | — | Story tile headlines in the main feed |
+| Heading Small | PolySans | 20px / 1.25rem | 700 | 1.00 | — | Compact tile headlines |
+| Light Capitalized Label | PolySans | 19px / 1.19rem | 300 | 1.20 | 1.9px | Thin-weight capitalized eyebrows — a distinctive Verge move |
+| All-Caps Label XL | PolySans | 18px / 1.13rem | 400 | 1.10 | 1.8px | UPPERCASE section kickers |
+| Bold Body | PolySans | 16px / 1.00rem | 700 | 1.00 | — | Emphasis within decks |
+| Body Relaxed | PolySans | 16px / 1.00rem | 500 | 1.60 | — | Long-form reading body |
+| Inline Label | PolySans | 15px / 0.94rem | 400 | 1.20 | 0.15px | UI labels and secondary headlines |
+| Body Compact | PolySans | 13px / 0.81rem | 400 | 1.60 | — | Secondary captions and decks |
+| Eyebrow All-Caps | PolySans | 12px / 0.75rem | 400 | 1.30 | 1.8px | UPPERCASE kicker above tile headlines |
+| Tag Label | PolySans | 12px / 0.75rem | 400 | 1.20 | 0.72px | UPPERCASE category tag |
+| Caption Micro | PolySans | 11px / 0.69rem | 400 | 1.20 | 1.1px | UPPERCASE bylines |
+| Meta Nano | PolySans | 10px / 0.63rem | 500 | 1.40 | 1.5px | UPPERCASE timestamp microtext |
+| Mono Button Label | PolySans Mono | 12px / 0.75rem | 600 | 2.00 | 1.5px | UPPERCASE button text, very open leading |
+| Mono Timestamp | PolySans Mono | 11px / 0.69rem | 500/600 | 1.20 | 1.1–1.8px | UPPERCASE StoryStream timestamps |
+| Serif Body | FK Roman Standard | 16px / 1.00rem | 400 | 1.30 | -0.16px | Review decks, print-voice excerpts |
+| Serif Caption | FK Roman Standard | 20px / 1.25rem | 400 | 1.20 | — | Magazine-style pull quotes |
 
 ### Principles
-- **Display weight stays at 300.** Waldenburg Light is the editorial signature. Never bold display copy.
-- **Subtle letter-spacing on body.** Inter at +0.15-0.18px tracking — slightly looser than default Inter for a more editorial feel.
-- **Negative letter-spacing on display.** Waldenburg pulls -0.32px to -1.92px tighter on display sizes.
+- **Manuka is always the hero, never the UI.** If you see Manuka below 60px you're looking at a bug. It exists to *shout the brand*, not to label a button.
+- **PolySans is the workhorse, PolySans Mono is its uniformed sibling.** Mono is used exclusively for UPPERCASE labels, timestamps, tags, and certain buttons. Lowercase mono doesn't exist in this system.
+- **Thin-weight (300) capitalized headlines** are a signature Verge move. The 19–20px weight-300 with 1.9px tracking creates a "fashion magazine whisper" that contrasts with the 107px Manuka shout above it. This whisper-vs-shout contrast is the typographic fingerprint.
+- **Letter-spacing has two registers**: positive (0.72–1.9px) for ALL-CAPS mono and sans labels, negative (`-0.16px`) for the rare serif appearances, barely-positive (0.32px, 1.07px) for massive display. Plain 0 letter-spacing is rare.
+- **FK Roman Standard is the editorial exception**, not the rule. Reserve it for long-form print-voice moments — reviews, critic pulls, masthead essays. Never use it in UI.
+- **Line heights are tight** (0.80–1.30) for every display and label, relaxed (1.60–2.00) only for reading body and mono button labels. The leading jump is intentional — it gives the page a "telegraph ticker" rhythm.
 
 ### Note on Font Substitutes
-Waldenburg is licensed. Open-source substitute: **EB Garamond** at weight 300 (slightly more humanist) or **GT Sectra** (closer to Waldenburg's modernity). Use Inter directly for body — it's the same family ElevenLabs uses.
+The 0.80 line-height on Manuka display (107px, 90px, 60px) assumes the **proprietary Manuka face from Klim Type Foundry**, which has aggressively tight vertical metrics designed for athletic stance at large sizes. If you substitute with wide-metric open-source condensed displays like **Anton**, **Oswald**, **Bebas Neue**, or **Archivo Black**, loosen display line-heights by approximately **+0.10 to +0.15** to prevent ascender/descender collisions (e.g., 0.80 → 0.95). PolySans substitutes (Space Grotesk, DM Sans, Hanken Grotesk) work at the token values without adjustment — their metrics are close enough. PolySans Mono substitutes (Space Mono, JetBrains Mono) and FK Roman substitutes (Newsreader, Literata) also work without adjustment.
 
-## Layout
-
-### Spacing System
-- **Base unit:** 4px.
-- **Tokens:** `{spacing.xxs}` 4px · `{spacing.xs}` 8px · `{spacing.sm}` 12px · `{spacing.base}` 16px · `{spacing.md}` 20px · `{spacing.lg}` 24px · `{spacing.xl}` 32px · `{spacing.xxl}` 48px · `{spacing.section}` 96px.
-- **Section padding:** 96px.
-
-### Grid & Container
-- Max content width: ~1200px.
-- Editorial body: 12-column grid.
-- Feature card grids: 2-up at desktop for hero splits, 3-up for benefit grids.
-- Footer: 5-column at desktop.
-
-### Whitespace Philosophy
-Generous editorial pacing — print-magazine feel. 96px between bands; cards inside bands sit close (16-24px gap). The atmospheric gradient orbs occupy generous breathing space without competing with copy.
-
-## Elevation & Depth
-
-The system uses **hairline + soft drop**. Cards float above the off-white canvas via 1px hairlines and a single subtle shadow tier. Atmospheric depth comes from gradient orbs.
-
-| Level | Treatment | Use |
-|---|---|---|
-| Flat (canvas) | `{colors.canvas}` (#f5f5f5) | Body bands, footer |
-| Card | `{colors.surface-card}` (#ffffff) | Content cards |
-| Hairline border | 1px `{colors.hairline}` | Card outlines |
-| Soft drop | `0 4px 16px rgba(0, 0, 0, 0.04)` | Hovered cards (single shadow tier) |
-| Gradient orb | Radial gradient with one of `{colors.gradient-*}` | Atmospheric depth — never a card surface |
-
-### Decorative Depth
-- **Pastel gradient orbs** are the brand's strongest atmospheric pattern. Soft radial blooms in mint, peach, lavender, sky, or rose drift through hero bands and feature sections without containing any content — they are pure atmosphere.
-
-## Shapes
-
-### Border Radius Scale
-
-| Token | Value | Use |
-|---|---|---|
-| `{rounded.none}` | 0px | Reserved |
-| `{rounded.xs}` | 4px | Inline tags |
-| `{rounded.sm}` | 6px | Compact rows |
-| `{rounded.md}` | 8px | Form inputs |
-| `{rounded.lg}` | 12px | Compact cards |
-| `{rounded.xl}` | 16px | Feature cards, pricing tiers |
-| `{rounded.xxl}` | 24px | Gradient orb cards (extra-soft) |
-| `{rounded.pill}` | 9999px | All CTA buttons, badges |
-| `{rounded.full}` | 9999px | Voice icon circles, avatars |
-
-## Components
-
-### Top Navigation
-
-**`top-nav`** — Background `{colors.canvas}`, text `{colors.ink}`, height 64px. Layout: ElevenLabs wordmark left, primary horizontal menu (Creative / Agents / Video / Pricing / Enterprise / Docs), Sign In + "Try free" primary CTA right.
+## 4. Component Stylings
 
 ### Buttons
 
-**`button-primary`** — Near-black ink pill. Background `{colors.primary}`, text `{colors.on-primary}`, type `{typography.button}` (15px / 500), padding 10px × 20px, height 40px, rounded `{rounded.pill}`.
+**Primary — Jelly Mint Pill**
+- Background: `#3cffd0` (Jelly Mint)
+- Text: `#000000` (Absolute Black), PolySans 16px / 700 or PolySans Mono 12px / 600 UPPERCASE
+- Border: none (pure fill)
+- Border radius: `24px` — fully rounded pill
+- Padding: `10px 24px`
+- Outline: `none` at rest
+- Hover: background shifts to `rgba(255, 255, 255, 0.2)` (translucent white), text stays black, adds a 1px `#c2c2c2` ring shadow
+- Active: background `rgba(140, 140, 140, 0.87)`, opacity `0.5`, ring shadow `#8c8c8c`
+- Focus: background `#1eaedb`, white text, 1px solid `#0500ff` border, translucent white focus ring
+- Transition: ~180ms ease on background and shadow
 
-**`button-primary-active`** — Press state. Background `{colors.primary-active}`.
+**Secondary — Dark Slate Pill**
+- Background: `#2d2d2d` (Surface Slate)
+- Text: `#e9e9e9` (Muted Text), PolySans 16px / 400
+- Border: none
+- Border radius: `24px`
+- Padding: `10px 24px`
+- Outline: `rgb(233, 233, 233) none 0px`
+- Hover: same translucent white invert as primary — `rgba(255, 255, 255, 0.2)` bg, black text, 1px `#c2c2c2` ring
+- Focus: same cyan focus treatment as primary
 
-**`button-outline`** — Transparent pill with 1px ink border. Background transparent, text `{colors.ink}`, 1px `{colors.hairline-strong}` border.
+**Tertiary — Outlined Mint**
+- Background: transparent
+- Text: `#3cffd0`, PolySans Mono 12px / 600 UPPERCASE, 1.5px tracking
+- Border: `1px solid #3cffd0`
+- Border radius: `40px` — larger pill for secondary outline style
+- Padding: ~`10px 20px`
+- Hover: inverts to mint fill, black text
+- Transition: 150ms ease
 
-**`button-tertiary-text`** — Inline ink text link.
+**Outlined Ultraviolet (Promotional)**
+- Background: transparent
+- Text: `#5200ff` or `#ffffff`
+- Border: `1px solid #5200ff`
+- Border radius: `30px`
+- Used for "Subscribe" or "Join the Stream" style promotional callouts
 
-### Hero & Atmospheric
+**Pill Tag (Non-interactive)**
+- Background: saturated accent (`#3cffd0`, `#5200ff`, yellow, etc.)
+- Text: black or white depending on background luminance
+- Border radius: `20px` (tighter radius than buttons — this is the *text pill*)
+- Font: PolySans Mono 11px / 600 UPPERCASE, 1.8px tracking
+- Padding: ~`4px 10px`
 
-**`hero-band`** — Background `{colors.canvas}`, full-width display headline in `{typography.display-mega}` (64px / 300 / -1.92px), subhead in `{typography.body-md}`, two CTAs, and an atmospheric gradient orb behind the centered headline.
+### Cards & Containers
 
-**`gradient-orb-card`** — A large card with a soft radial-gradient orb behind centered display copy. Background `{colors.canvas-soft}`, rounded `{rounded.xxl}` (24px), padding 32px. Each variant uses one of the five gradient tokens (`gradient-mint`, `gradient-peach`, `gradient-lavender`, `gradient-sky`, `gradient-rose`).
+**StoryStream Tile**
+- Background: either `#131313` + 1px white border, OR a saturated accent fill (mint, purple, yellow, pink, orange, white)
+- Border radius: `20px` (standard) or `24px` (feature)
+- Border: `1px solid #ffffff` (on dark) or `0px 0px 1px solid #3cffd0` (on mint) or nothing (on saturated fill)
+- Padding: ~24–32px interior
+- Hover: no lift, no scale — the headline text color transitions from white to `#3860be` (deep link blue)
+- Transition: 150ms ease on color only
 
-**`audio-waveform-card`** — A waveform visualization card. Background `{colors.surface-card}`, rounded `{rounded.xl}`, padding 24px. Holds a play button + waveform glyph + voice metadata.
+**Feature Card (Top Story)**
+- Background: `#131313` with 1px hairline border, OR full-bleed color accent
+- Border radius: `24px`
+- Padding: 32px+
+- Image inside: clipped to match the outer radius (`3px` or `4px` inner radius when nested)
+- Hover: text color shift only; the image remains static
 
-### Cards
+**StoryStream Rail (Timeline)**
+- A vertical dashed or solid rule (1px `#3d00bf` or `#ffffff`) runs along the left edge of each item, marking the timeline spine
+- Timestamps sit on the left rail in PolySans Mono 11px / 500 / UPPERCASE / 1.1px tracking
+- Each entry is a pill-cornered rectangle separated from its neighbors by 12–16px vertical gap
 
-**`feature-card`** — 2-up or 3-up grids. Background `{colors.surface-card}`, text `{colors.ink}`, rounded `{rounded.xl}`, padding 24px, 1px hairline border.
+### Inputs & Forms
+- **Default**: `#131313` background, 1px solid `#ffffff` or `#949494` border, `2px` border radius (tight, newspaper-form feel), PolySans 15px text in `#ffffff`, placeholder in `#949494`.
+- **Focus**: border transitions to `#3cffd0` (jelly mint) with optional `1px solid #5200ff` inner ring on deep focus. No glow.
+- **Error**: border turns `#5200ff` (ultraviolet — used as error/alert accent here, not the usual red).
+- **Transition**: ~150ms ease on border-color.
 
-**`product-card-stack`** — Stacked product preview cards. Background `{colors.surface-card}`, rounded `{rounded.xl}`, no padding (children fill the card edge-to-edge).
+### Navigation
 
-**`testimonial-card`** — Quote card. Background `{colors.surface-card}`, text `{colors.body}`, rounded `{rounded.xl}`, padding 32px.
+- **Top nav**: thin `#131313` bar with the Verge wordmark (Manuka) left-aligned, a search icon and a few UPPERCASE mono category links (12–14px, PolySans Mono, 1.5–1.8px tracking), and a single mint-pill CTA (usually "Subscribe") pinned right.
+- **Wordmark**: massive on first scroll — the homepage treats the "The Verge" logo as a hero element, not a 32px corner logo.
+- **Hover**: every link transitions from `#ffffff` to `#3860be` (deep link blue). No underline — it's a color-only response.
+- **Active section**: marked by a 1px mint underline (inset box-shadow `0px -1px 0px 0px inset #3cffd0`)
+- **Mobile**: the wordmark shrinks, category nav collapses into a hamburger drawer. Inside the drawer, links are mono-uppercase and stack with 16–20px gaps.
 
-### Voice Library
+### Image Treatment
 
-**`voice-row`** — Horizontal row in voice list. Background transparent, 1px hairline divider. Layout: 32px circular voice icon (`{component.voice-icon-circular}`) left, voice name + accent stack, optional preview button right.
+- **Aspect ratios**: 16:9 dominates for hero and feature images, 4:3 for mid-feed, 1:1 for thumbnails and author avatars.
+- **Corners**: always rounded to match the parent card — `3px`, `4px`, or inherit `20px` / `24px` from the tile.
+- **Frame**: 1px `#313131` or `#ffffff` hairline around photography, giving a "contained Polaroid" feel.
+- **Full-bleed**: only within the color-block tiles, where the image runs to the padded edge of the accent fill.
+- **Hover**: static — no zoom, no scale, no opacity shift. The headline below is the only interactive response.
+- **Lazy loading**: `loading="lazy"` on everything below the first fold; eager on the masthead hero only.
 
-**`voice-icon-circular`** — Background `{colors.surface-strong}`, rounded `{rounded.full}`, 32px diameter. Holds initials or voice glyph.
+### StoryStream Timeline Item (Distinctive)
 
-### Pricing
+- Vertical rail line (1px `#3d00bf` or `#ffffff` on `#131313`)
+- Mono timestamp on the left in PolySans Mono 11px / UPPERCASE
+- Pill-cornered body card (20px radius) with kicker, headline, and optional deck
+- Stacked vertically with 12–16px gap, the rail continuing between them
+- Often interleaved with full-bleed accent tiles that "break" the timeline rhythm for emphasis
 
-**`pricing-tier-card`** — Background `{colors.surface-card}`, rounded `{rounded.xl}`, padding 32px, 1px hairline border.
+## 5. Layout Principles
 
-**`pricing-tier-featured`** — Featured tier inverts. Background `{colors.surface-dark}`, text `{colors.on-dark}`. Same shape, dark inversion.
+### Spacing System
+- **Base unit**: 8px.
+- **Scale**: 1, 2, 4, 5, 6, 8, 9, 10, 12, 14, 15, 16, 20, 24, 25px.
+- **Section padding**: 32–64px vertical between major feed sections. StoryStream items themselves are tighter — 12–16px gaps.
+- **Card padding**: 20–32px interior. Feature cards expand to 40–48px.
+- **Inline spacing**: kickers sit ~6–10px above headlines; headlines sit ~10–14px above decks; timestamps sit ~6–8px below decks.
+- **Micro-scale**: The 2/4/5/6/9/10px values are used inside buttons, pills, and tight label clusters, not in the editorial grid.
 
-### Forms & Tags
+### Grid & Container
+- **Max width**: ~1280–1300px (dembrandt detected breakpoints at 1200/1280/1300).
+- **Column patterns**: a 12-column underlying grid that resolves into 3-column hero + 1-column StoryStream rail + feature panels. The homepage feels freeform because color-block tiles frequently span 2–3 columns on a whim.
+- **Container padding**: 24px mobile / 48px desktop on the outer edges.
+- **Gutters**: 16–24px between columns, tighter (8–12px) inside StoryStream items.
 
-**`text-input`** — Background `{colors.surface-card}`, text `{colors.ink}`, rounded `{rounded.md}` (8px), padding 12px × 16px, height 44px, 1px `{colors.hairline-strong}` border. On focus, border thickens to 2px ink.
+### Whitespace Philosophy
+The Verge treats whitespace like a club DJ treats silence — as a dramatic reset between loud moments. The canvas is so dark and the accents are so saturated that even 32px of empty `#131313` between two tiles acts as a palette cleanser. The page is not airy like Apple or Stripe; it's **paced**, with loud hazard-color blocks interrupting stretches of near-black. Whitespace carries the rhythm, not the elegance.
 
-**`badge-pill`** — Background `{colors.surface-strong}`, text `{colors.ink}`, type `{typography.caption-uppercase}`, rounded `{rounded.pill}`, padding 4px × 10px.
+### Border Radius Scale
+- **2px** — inputs, small badges (feels like a typewriter tag)
+- **3px** — inline images (just enough to soften against the canvas)
+- **4px** — nested card images and small button variants
+- **20px** — standard pill cards and color-block tiles
+- **24px** — feature tile radius and primary button pill
+- **30px** — large promotional buttons
+- **40px** — outlined CTA pills (the loudest pill in the system)
+- **50%** — avatar circles, icon buttons, and certain round badges
 
-### CTA / Footer
+Eight discrete radius values — a **lot** for a single site. This is deliberate: the rhythm between 2px typewriter tags, 20px pill cards, and 40px outlined buttons creates a "nested scale" feel where every component announces its hierarchy through its corners.
 
-**`cta-band`** — Pre-footer. Background `{colors.canvas}`, centered display headline in `{typography.display-lg}`, single ink pill CTA. 96px padding.
+## 6. Depth & Elevation
 
-**`footer`** — Closing footer. Background `{colors.canvas}`, text `{colors.body}`. 5-column link list. 64×48px padding.
+| Level | Treatment | Use |
+|---|---|---|
+| 0 | No border, no shadow | Default `#131313` canvas text |
+| 1 | `rgba(0,0,0,0) 0px 0px 0px 0px inset` (placeholder) | Reset state for interactive elements |
+| 2 | `1px solid #ffffff` or `#313131` hairline | Image frames and quiet card outlines |
+| 3 | `1px solid #3cffd0` hairline | Active button outlines, focused story tiles |
+| 4 | `1px solid #5200ff` hairline | Promotional/alternate state outlines |
+| 5 | `rgba(0, 0, 0, 0.33) 0px 0px 0px 1px` | The single "atmospheric" ring — applied to layered cards |
+| 6 | `0px -1px 0px 0px inset` (mint/black/white) | Active tab underline — a signature Verge move |
+| 7 | Saturated accent fill (`#3cffd0`, `#5200ff`, white, yellow, pink) | Story-tile elevation via color, not shadow |
 
-**`footer-link`** — Background transparent, text `{colors.body}`, type `{typography.body-sm}`.
+The Verge's depth philosophy is **color-as-elevation**. When something needs to stand out, it doesn't get a shadow — it gets a mint fill or a 1px hazard-color border. There are 14 shadow entries in the extracted tokens, but all of them are either inset underlines (0px -1px inset) or near-transparent 1px rings — none of them are traditional elevation shadows. The `#131313` canvas stays perfectly flat throughout, and hierarchy is carried by color saturation.
 
-## Do's and Don'ts
+### Decorative Depth
+- **1px inset underline** on active tabs/nav links (mint, black, or white depending on context)
+- **Subtle `rgba(0, 0, 0, 0.33)` 1px ring** on stacked cards — the only effect that faintly resembles a shadow
+- **No gradients, no glows, no atmospheric blurs** anywhere. The hazard-tape aesthetic would break if anything faded softly.
+
+## 7. Do's and Don'ts
 
 ### Do
-- Reserve `{colors.primary}` (ink pill) for primary CTAs.
-- Use Waldenburg Light at weight 300 for every display headline. Never bold.
-- Use Inter at +0.15-0.18px tracking for body — the editorial dialect.
-- Use atmospheric gradient orbs (mint/peach/lavender/sky/rose) as decoration only.
-- Use the pill shape for every CTA and badge.
+- **Do** use `#131313` as the canvas for every view. There is no light mode.
+- **Do** use Jelly Mint (`#3cffd0`) and Verge Ultraviolet (`#5200ff`) as hazard accents — buttons, borders, active states, and saturated color-block tiles.
+- **Do** use Manuka exclusively at 60px+ for hero headlines. Treat anything smaller as a bug.
+- **Do** round everything: 20px for cards, 24px for feature cards, 30–40px for pill buttons.
+- **Do** use PolySans Mono for UPPERCASE labels, timestamps, kickers, and button text. Lowercase mono doesn't exist here.
+- **Do** apply 1.5–1.9px letter-spacing to every ALL-CAPS label — this is a Verge signature.
+- **Do** use saturated color-block tiles (mint, purple, yellow, pink, orange, white) to elevate a story — never a drop shadow.
+- **Do** use `#3860be` (deep link blue) as the hover color on every link, regardless of base color.
+- **Do** apply the StoryStream timeline rail (1px dashed/solid `#3d00bf` or white) on feed views.
+- **Do** use thin-weight (300) PolySans at 19–20px with 1.9px tracking for "fashion-whisper" capitalized eyebrows — the contrast with the 107px Manuka shout is the whole voice.
 
 ### Don't
-- Don't introduce a saturated brand action color. Ink pill is the only CTA color.
-- Don't bold display copy. Display sits at weight 300 — bolding shifts the brand voice from editorial to consumer-marketing.
-- Don't use gradient orbs as button fills, text colors, or component backgrounds. They are pure atmosphere.
-- Don't use sharp `{rounded.none}` (0px) on CTAs. Pill geometry is the brand button.
-- Don't drop body Inter to weight 300 to match Waldenburg — body stays at 400/500 for legibility.
-- Don't extract a CTA color from a third-party widget (cookie consent, OneTrust). The brand's CTA color is what appears on actual product CTAs.
+- **Don't** use a light background. The dark canvas is the product.
+- **Don't** add `box-shadow` for elevation. Use 1px borders or saturated accent fills instead.
+- **Don't** use square corners. Every interactive and content container is rounded.
+- **Don't** use Manuka for UI, buttons, or body copy. It's strictly display.
+- **Don't** use lowercase mono. PolySans Mono is always UPPERCASE.
+- **Don't** let mint and ultraviolet appear as background washes — they're hazard accents, not canvas tints.
+- **Don't** use gradients anywhere. The system is solid color blocks only.
+- **Don't** introduce new accent colors outside the declared mint / purple / yellow / pink / orange tile palette.
+- **Don't** pair Manuka with FK Roman Standard in the same headline cluster — Manuka is the only display shout, serif pulls are reserved for body moments.
+- **Don't** use `#3cffd0` text on a `#131313` background at under 16px — the contrast vibrates at small sizes.
 
-## Responsive Behavior
+## 8. Responsive Behavior
 
 ### Breakpoints
 
 | Name | Width | Key Changes |
 |---|---|---|
-| Mobile | < 640px | Hero h1 64→32px; feature cards 1-up; nav hamburger; gradient orbs shrink. |
-| Tablet | 640–1024px | Hero h1 48px; feature cards 2-up. |
-| Desktop | 1024–1280px | Full hero h1 64px; feature cards 3-up. |
-| Wide | > 1280px | Content caps at 1200px. |
+| Small Mobile | <400px | Single column, Manuka hero scales down to ~48–54px, StoryStream rail collapses to inline timestamps |
+| Mobile | 400–549px | Single column, color-block tiles stack full-width, nav is a hamburger drawer |
+| Large Mobile | 550–767px | Still single column but padding opens up, tile radii stay at 20px |
+| Tablet | 768–1023px | 2-column StoryStream with feature card spanning, wordmark shrinks ~50% |
+| Small Desktop | 1024–1179px | Full 3–4 column editorial grid, mint pill CTA restored to nav |
+| Desktop | 1180–1299px | Max padding, Manuka wordmark at full hero scale |
+| Large Desktop | ≥1300px | Container caps at ~1280–1300px, whitespace expands at the margins, no further scaling |
+
+The dembrandt sweep detected 26 intermediate breakpoints (1300 → 1280 → 1200 → 1181 → 1180 → 1179 → 1024 → 1023 → 901 → 900 → 897 → 896 → 890 → 769 → 768 → 620 → 605 → 600 → 550 → 549 → 530 → 426 → 425 → 400 → 320). The Verge tunes its grid at virtually every major device boundary — an unusually aggressive responsive strategy.
 
 ### Touch Targets
-- Primary pill at 40px height — at WCAG AA, padded for AAA.
-- Voice icon circles 32px — padded row creates effective 48px tap zone.
+- Primary pill buttons are ~44px minimum height (10px vertical padding + 16px text + 2px border) — meets WCAG AA.
+- Mono uppercase nav links are smaller (~28–32px tall) — for derivative work, pad to 44px on mobile.
+- Circle icon buttons are 40–44px circles, touch-friendly.
 
 ### Collapsing Strategy
-- Top nav switches to hamburger below 768px.
-- Feature grid: 3-up → 2-up → 1-up.
-- Gradient orbs reduce diameter at every breakpoint but never disappear.
+- **Nav**: wordmark scales from hero (Manuka 60–107px) to ~24–32px on mobile. Category links collapse to a hamburger drawer below 900px.
+- **Grid**: 4-col → 3-col → 2-col → 1-col. Feature cards that span 2 columns on desktop reflow to full-width single-column on mobile.
+- **Spacing**: section padding tightens from 64px → 32px → 20px. Tile interior padding tightens from 32px → 20px.
+- **Type**: Manuka hero scales from 107px to ~48–54px on mobile. PolySans headlines scale from 34px → 24px. Mono labels stay pinned at 11–12px (they don't shrink further or they become unreadable).
+- **Color tiles**: accent story blocks never lose saturation on mobile — they just reflow to full width.
 
-## Iteration Guide
+### Image Behavior
+- Responsive raster via `srcset`, aspect ratios preserved.
+- No art-direction swaps — same crop scales across all viewports.
+- `loading="lazy"` on everything below the fold, `eager` on the masthead hero.
+- Images inside color-block tiles inherit the tile's inner radius (4px or 20px nested).
 
-1. Focus on a single component at a time.
-2. CTAs default to `{rounded.pill}`. Cards use `{rounded.xl}` (16px).
-3. Variants live as separate entries.
-4. Use `{token.refs}` everywhere — never inline hex.
-5. Hover state never documented.
-6. Waldenburg 300 for display, Inter 400/500 for body.
-7. Gradient orbs scoped to atmospheric decoration.
+## 9. Agent Prompt Guide
 
-## Known Gaps
+### Quick Color Reference
+- **Primary CTA**: "Jelly Mint (`#3cffd0`)"
+- **Background (Canvas)**: "Canvas Black (`#131313`)"
+- **Accent (Secondary Hazard)**: "Verge Ultraviolet (`#5200ff`)"
+- **Heading Text**: "Hazard White (`#ffffff`)"
+- **Body Text**: "Hazard White (`#ffffff`)" (primary) or "Muted Text (`#e9e9e9`)"
+- **Secondary Text / Metadata**: "Secondary Text (`#949494`)"
+- **Card Border**: "Hazard White (`#ffffff`)" hairline on dark, "Console Mint Border (`#309875`)" on mint variants
+- **Link Hover**: "Deep Link Blue (`#3860be`)"
 
-- Waldenburg is a licensed typeface; EB Garamond / GT Sectra are documented substitutes.
-- Animation timings (orb drift, waveform pulse, hero entrance) out of scope.
-- In-product surfaces (voice library editor, agent playground) only partially captured via marketing mockups.
-- Form validation states beyond focus not visible on captured surfaces.
+### Example Component Prompts
+1. *"Create a StoryStream timeline item on a `#131313` canvas: a 20px-radius rectangle with a 1px solid `#ffffff` border, a PolySans Mono 11px / 600 / UPPERCASE / 1.1px tracking timestamp on the left rail, a 12px PolySans UPPERCASE kicker in mint (`#3cffd0`), and a 24px / 700 PolySans headline in white below. No shadow, no lift — hover only shifts the headline color to `#3860be`."*
+2. *"Design a primary subscribe button with a Jelly Mint (`#3cffd0`) fill, black text in PolySans Mono 12px / 600 / UPPERCASE / 1.5px tracking, 24px border radius, 10px × 24px padding. Hover state shifts to `rgba(255, 255, 255, 0.2)` background with a 1px `#c2c2c2` ring shadow, 180ms ease."*
+3. *"Build a feature hero with a 107px Manuka 900 headline in white with 1.07px letter-spacing and 0.80 line-height, a thin-weight 300 PolySans 20px capitalized kicker above with 1.9px tracking, on a `#131313` canvas with 64px vertical padding."*
+4. *"Create a color-block accent tile filled with Verge Ultraviolet (`#5200ff`) at 0.9 alpha, 24px border radius, white text, a PolySans Mono 11px UPPERCASE category label with 1.5px tracking at the top, and a 32px PolySans 400 capitalized headline with 0.32px tracking below."*
+5. *"Design a dark slate secondary button with a `#2d2d2d` background, `#e9e9e9` PolySans 16px text, 24px radius pill shape, 10px × 24px padding. Hover matches the primary button — translucent white `rgba(255, 255, 255, 0.2)` bg with black text."*
+
+### Iteration Guide
+When refining existing screens generated with this design system:
+1. **Audit the canvas.** If you see a light background anywhere on the homepage, flatten it to `#131313`. There is no light mode.
+2. **Audit corners.** Every rectangle should land on 2/3/4/20/24/30/40px or 50%. Square corners break the voice.
+3. **Audit shadows.** Strip every `box-shadow` that isn't a 1px inset underline or a 1px hazard-color border. The Verge uses color for elevation, not shadow.
+4. **Audit type roles.** Manuka only ≥60px. PolySans Mono only UPPERCASE. PolySans 300 at 19–20px should have 1.9px tracking. FK Roman only for body/magazine moments, never UI.
+5. **Audit accent usage.** Mint and ultraviolet should appear as hazard accents — buttons, 1px borders, active underlines, saturated tile fills. If they're appearing as background washes or gradient fades, correct to solid blocks.
+6. **Audit labels.** Every kicker, timestamp, category tag, and button label should be ALL CAPS with 1.1–1.9px letter-spacing. Missing tracking = missing voice.
+7. **Audit link hover.** Every link, regardless of its base color, should hover to `#3860be` deep link blue with no underline. Any other hover color is drift.
