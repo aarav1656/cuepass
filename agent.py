@@ -1,7 +1,7 @@
 """Gemini-powered subtitle compliance agent.
 
-The agent orchestrates the deterministic measure→classify→repair→re-measure loop.
-Gemini's role is step 3 only: given a list of failing cues, decide which are
+The agent orchestrates the deterministic measure->classify->repair->re-measure loop.
+Gemini's role is step 4: given a list of failing cues, decide which are
 auto-repairable vs. which require human editorial review.
 
 Why Gemini here:
@@ -12,13 +12,13 @@ Why Gemini here:
   work; Gemini only sets the strategy.
 
 Steps:
-  1. fetch_film       — pick a real archive.org film with .srt
-  2. fetch_spec       — Parallel Search fetches the live platform spec
-  3. measure_before   — deterministic measure
-  4. classify         — Gemini reviews failures, classifies each
-  5. repair           — deterministic retime
-  6. measure_after    — re-measure; raises if not improved
-  7. build_report     — return structured results for the UI
+  1. fetch_film       -- pick a real archive.org film with .srt
+  2. fetch_spec       -- Parallel Search fetches the live platform spec (REQUIRED)
+  3. measure_before   -- deterministic measure
+  4. classify         -- Gemini reviews failures, classifies each (REQUIRED)
+  5. repair           -- deterministic retime
+  6. measure_after    -- re-measure; raises if not improved
+  7. build_report     -- return structured results for the UI
 """
 
 from __future__ import annotations
@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path("data")
 
 
+class GeminiUnavailableError(Exception):
+    """Raised when Gemini cannot classify failures.
+
+    This is a hard failure. The agent requires Gemini for semantic classification
+    of subtitle violations. A silent deterministic fallback would make Gemini
+    decorative rather than load-bearing.
+    """
+
+
 def _gemini_classify(
     failures: list[dict],
     spec: dict,
@@ -46,20 +55,43 @@ def _gemini_classify(
     """Ask Gemini to classify each failing cue.
 
     Returns a dict mapping cue_index -> "auto_fixable" | "needs_review".
-    Falls back to pure deterministic logic if Gemini is unavailable.
+    Raises GeminiUnavailableError if Gemini cannot be reached.
     """
     try:
         from google import genai  # type: ignore[import-untyped]
     except ImportError:
-        logger.warning("google-genai not installed; using deterministic fallback")
-        return _deterministic_classify(failures)
+        raise GeminiUnavailableError(
+            "google-genai package not installed. "
+            "Install with: pip install google-genai"
+        )
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        logger.warning("GEMINI_API_KEY not set; using deterministic fallback")
-        return _deterministic_classify(failures)
+    # Use Vertex AI via Application Default Credentials (gcloud auth)
+    # This is the production path on Cloud Run (uses service account)
+    # and local dev path (uses gcloud auth application-default login)
+    use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1", "yes")
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    client = genai.Client(api_key=api_key)
+    if use_vertex:
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        if not project:
+            raise GeminiUnavailableError(
+                "GOOGLE_GENAI_USE_VERTEXAI=true but GOOGLE_CLOUD_PROJECT is not set."
+            )
+        client = genai.Client(project=project, location=location)
+        model = "gemini-2.5-flash"
+        logger.info("Using Gemini via Vertex AI (project=%s, model=%s)", project, model)
+    elif gemini_api_key:
+        client = genai.Client(api_key=gemini_api_key)
+        model = "gemini-2.0-flash"
+        logger.info("Using Gemini via API key (model=%s)", model)
+    else:
+        raise GeminiUnavailableError(
+            "No Gemini credentials available. Set either:\n"
+            "  - GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT (for Vertex AI)\n"
+            "  - GEMINI_API_KEY (for direct API access)\n"
+            "Gemini is required for semantic classification of subtitle violations."
+        )
 
     # Compact failure summary to save tokens
     failure_summary = json.dumps(
@@ -96,7 +128,7 @@ def _gemini_classify(
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=model,
             contents=prompt,
         )
         text = response.text.strip()
@@ -104,20 +136,14 @@ def _gemini_classify(
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         raw = json.loads(text)
-        return {int(k): v for k, v in raw.items()}
+        result = {int(k): v for k, v in raw.items()}
+        logger.info("Gemini classified %d cues (model=%s)", len(result), model)
+        return result
     except Exception as exc:
-        logger.warning("Gemini classification failed: %s; using deterministic fallback", exc)
-        return _deterministic_classify(failures)
-
-
-def _deterministic_classify(failures: list[dict]) -> dict[int, str]:
-    """Fallback: auto_fixable iff the check is reading_speed or min_duration."""
-    return {
-        f["cue_index"]: (
-            "auto_fixable" if f["check"] in ("reading_speed", "min_duration") else "needs_review"
-        )
-        for f in failures
-    }
+        raise GeminiUnavailableError(
+            f"Gemini classification failed: {exc}. "
+            "Check credentials and network connectivity."
+        ) from exc
 
 
 def run_agent(
@@ -130,10 +156,15 @@ def run_agent(
     identifier: archive.org item identifier; if None, picks automatically.
     platform:   spec target ("netflix", "amazon", "bbc", "fcc").
     max_video_mb: cap on video download (we only need the .srt, but log the size).
+
+    Raises:
+        parallel_spec.ParallelUnavailableError: if Parallel Search is unavailable.
+        GeminiUnavailableError: if Gemini classification is unavailable.
+        RuntimeError: if no film/subtitle found or repair fails to improve.
     """
     DATA_DIR.mkdir(exist_ok=True)
 
-    # ── Step 1: pick film ──────────────────────────────────────────────────
+    # Step 1: pick film
     if identifier is None:
         results = archive_mod.search(rows=10)
         info = None
@@ -155,14 +186,14 @@ def run_agent(
 
     logger.info("Film: %s (%s), subtitle: %s", film_title, film_identifier, subtitle_filename)
 
-    # ── Step 2: fetch spec via Parallel Search ─────────────────────────────
+    # Step 2: fetch spec via Parallel Search (REQUIRED, raises on failure)
     spec = parallel_spec.fetch_spec(platform)
     logger.info(
-        "Spec: %s — %s cps, source: %s (cached=%s)",
+        "Spec: %s -- %s cps, source: %s (cached=%s)",
         spec["platform"], spec["max_cps"], spec["source_url"], spec["is_cached"],
     )
 
-    # ── Step 3: fetch subtitle and measure before ──────────────────────────
+    # Step 3: fetch subtitle and measure before
     srt_text = archive_mod.fetch_text(film_identifier, subtitle_filename)
     if not srt_text.strip():
         raise RuntimeError(f"Empty subtitle file for {film_identifier}/{subtitle_filename}")
@@ -178,14 +209,14 @@ def run_agent(
         report_before.over_line_count,
     )
 
-    # ── Step 4: Gemini classifies failures ────────────────────────────────
+    # Step 4: Gemini classifies failures (REQUIRED, raises on failure)
     failures_dicts = report_before.findings_as_dicts()
     classification = _gemini_classify(failures_dicts, spec, film_title)
 
     auto_count = sum(1 for v in classification.values() if v == "auto_fixable")
     review_count = sum(1 for v in classification.values() if v == "needs_review")
 
-    # ── Step 5: deterministic repair ──────────────────────────────────────
+    # Step 5: deterministic repair
     srt_repaired, n_changed = measure_mod.remediate_subtitles(
         srt_text,
         max_cps=spec["max_cps"],
@@ -197,7 +228,7 @@ def run_agent(
     repaired_path.write_text(srt_repaired, encoding="utf-8")
     logger.info("Repaired SRT written to %s (%d cues changed)", repaired_path, n_changed)
 
-    # ── Step 6: re-measure and verify improvement ─────────────────────────
+    # Step 6: re-measure and verify improvement
     report_after = measure_mod.measure_subtitles(srt_repaired, spec=spec)
     logger.info(
         "After: %d cues, %d violations (%d over-cps, %d under-duration)",
@@ -215,7 +246,7 @@ def run_agent(
             f"Repair did NOT improve: fixable violations before={fixable_before}, after={fixable_after}"
         )
 
-    # ── Step 7: build report ──────────────────────────────────────────────
+    # Step 7: build report
     return {
         "film_title": film_title,
         "film_identifier": film_identifier,
@@ -235,6 +266,7 @@ def run_agent(
         "needs_review_count": review_count,
         "cues_changed": n_changed,
         "repaired_srt_path": str(repaired_path),
+        "gemini_model": "gemini-2.5-flash" if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1", "yes") else "gemini-2.0-flash",
         "improvement": {
             "over_cps": report_before.over_cps_count - report_after.over_cps_count,
             "under_duration": report_before.under_duration_count - report_after.under_duration_count,
