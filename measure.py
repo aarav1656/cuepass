@@ -258,6 +258,12 @@ def remediate_subtitles(
     cues = parse_srt(text)
     changed = 0
 
+    # Real ASR subtitle tracks are not always in chronological order, and the
+    # "do not run into the NEXT cue" rule is only sound if "next" means the next
+    # cue in TIME. On a real archive.org track an out-of-order cue produced a
+    # 21-second cue overlapping its neighbour. Sort before repairing.
+    cues.sort(key=lambda c: (c["start"], c["end"]))
+
     for i, c in enumerate(cues):
         chars = len(c["text"].strip())
         needed = max(chars / max_cps if max_cps else 0.0, min_duration_s)
@@ -266,7 +272,9 @@ def remediate_subtitles(
         needed = math.ceil(needed * 1000) / 1000
         if c["duration"] >= needed:
             continue
-        # Do not run into the next cue; leave ~42ms gap (1 frame at 24fps)
+        # Do not run into the next cue; leave ~42ms gap (1 frame at 24fps).
+        # Clamp to the cue's own end so an already-overlapping source cue is never
+        # extended further.
         ceiling = (
             cues[i + 1]["start"] - 0.042 if i + 1 < len(cues) else c["start"] + needed
         )
