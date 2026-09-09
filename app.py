@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 import agent as agent_mod
 
@@ -174,6 +174,22 @@ HTML = """<!DOCTYPE html>
       transition: opacity .15s;
     }
     .run-btn:hover:not(:disabled) { opacity: 0.82; }
+
+    .take-track {
+      display: inline-block;
+      margin-top: 14px;
+      background: var(--mint);
+      color: #000;
+      border-radius: 2px;
+      padding: 9px 18px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+    .take-track:hover { opacity: 0.82; }
     .run-btn:disabled {
       background: var(--surface-2);
       color: var(--text-3);
@@ -705,6 +721,11 @@ function renderSheet(d) {
     + '<div class="verdict-caption">Timing violations across <b>' + total
     + '</b> cues, before repair and after, from a second run of the same check '
     + 'on the repaired file (<b>' + esc(d.repaired_srt_path || 'repaired .srt') + '</b>)</div>'
+    + (d.repaired_srt_name
+        ? '<a class="take-track" href="/repaired/'
+          + encodeURIComponent(d.repaired_srt_name)
+          + '" download>Take repaired track</a>'
+        : '')
     + '</div>';
 
   var strip = '<div class="summary-strip">'
@@ -841,6 +862,34 @@ async def run(
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "cuepass"}
+
+
+@app.get("/repaired/{name}")
+async def repaired(name: str):
+    """Serve a repaired .srt this process wrote. No model call, no arbitrary read.
+
+    The name must be a key in agent.REPAIRED_FILES, which only run_agent writes,
+    so traversal (../, absolute paths, a name from another directory) never
+    matches and falls through to 404 along with any file since deleted.
+    """
+    download_name = agent_mod.REPAIRED_FILES.get(name)
+    if download_name is None:
+        raise HTTPException(status_code=404, detail="No such repaired track")
+    path = agent_mod.DATA_DIR / name
+    # Second gate: the resolved path must still sit inside the repair output dir.
+    out_dir = agent_mod.DATA_DIR.resolve()
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(out_dir)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="No such repaired track") from None
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="No such repaired track")
+    return FileResponse(
+        resolved,
+        media_type="text/x-subrip",
+        filename=download_name,
+    )
 
 
 if __name__ == "__main__":

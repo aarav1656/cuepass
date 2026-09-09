@@ -37,6 +37,18 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
 
+# Repaired .srt files this process wrote, by file name. The download route
+# serves nothing that is not in here, so a GET can never reach an arbitrary
+# path on disk.
+REPAIRED_FILES: dict[str, str] = {}
+
+
+def _download_name(title: str, fallback: str) -> str:
+    """Operator-facing file name, taken from the film title."""
+    keep = [c if (c.isalnum() or c in " -_") else " " for c in title]
+    slug = "_".join("".join(keep).split()) or fallback
+    return f"{slug[:80]}_repaired.srt"
+
 
 class GeminiUnavailableError(Exception):
     """Raised when Gemini cannot classify failures.
@@ -227,6 +239,7 @@ def run_agent(
     repaired_path = DATA_DIR / f"{film_identifier}_repaired.srt"
     repaired_path.write_text(srt_repaired, encoding="utf-8")
     logger.info("Repaired SRT written to %s (%d cues changed)", repaired_path, n_changed)
+    REPAIRED_FILES[repaired_path.name] = _download_name(film_title, film_identifier)
 
     # Step 5b: for every cue the retime could not clear, say why. Same sort and
     # same ceiling arithmetic as the repair, so the reason describes the repair
@@ -278,6 +291,8 @@ def run_agent(
         "needs_review_count": review_count,
         "cues_changed": n_changed,
         "repaired_srt_path": str(repaired_path),
+        "repaired_srt_name": repaired_path.name,
+        "repaired_download_name": REPAIRED_FILES[repaired_path.name],
         "gemini_model": "gemini-2.5-flash" if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1", "yes") else "gemini-2.0-flash",
         "improvement": {
             "over_cps": report_before.over_cps_count - report_after.over_cps_count,

@@ -31,14 +31,14 @@ CLEAN_SRT = textwrap.dedent("""\
     Another clean cue here.
 """)
 
-# 28 chars in 1.0 second = 28 cps — exceeds Netflix 17 cps limit
+# 28 chars in 1.0 second = 28 cps , exceeds Netflix 17 cps limit
 FAST_CUE_SRT = textwrap.dedent("""\
     1
     00:00:01,000 --> 00:00:02,000
     Hello world this is fast text here.
 """)
 
-# 5 chars in 0.1 second = 50 cps — way over limit
+# 5 chars in 0.1 second = 50 cps , way over limit
 VERY_FAST_SRT = textwrap.dedent("""\
     1
     00:00:01,000 --> 00:00:01,100
@@ -159,7 +159,7 @@ class TestMinDuration:
         assert report.under_duration_count >= 1
 
     def test_mutation_lower_threshold_passes(self):
-        """Lower min_duration to 0.4 s — the 0.5 s cue now passes."""
+        """Lower min_duration to 0.4 s , the 0.5 s cue now passes."""
         report_fail = m.measure_subtitles(SHORT_SRT, min_duration_s=0.833)
         assert report_fail.under_duration_count >= 1
         report_pass = m.measure_subtitles(SHORT_SRT, min_duration_s=0.4)
@@ -180,7 +180,7 @@ class TestLineLength:
         assert report.over_line_chars_count >= 1
 
     def test_mutation_raise_limit_passes(self):
-        """Raise the line-length limit above the longest line — violation clears."""
+        """Raise the line-length limit above the longest line , violation clears."""
         cues = m.parse_srt(LONG_LINE_SRT)
         longest = max(len(ln) for ln in cues[0]["lines"])
         report_fail = m.measure_subtitles(LONG_LINE_SRT, max_line_chars=42)
@@ -298,7 +298,7 @@ class TestSpecApplication:
             "source_label": "Test spec",
             "is_cached": False,
         }
-        # CLEAN_SRT has cues at ~4-6 cps — will violate a 5 cps limit on the fast ones
+        # CLEAN_SRT has cues at ~4-6 cps , will violate a 5 cps limit on the fast ones
         report_strict = m.measure_subtitles(CLEAN_SRT, spec=spec)
         report_default = m.measure_subtitles(CLEAN_SRT)
         # The strict spec should catch more or equal violations
@@ -406,3 +406,82 @@ class TestLeftoverReasons:
     def test_cue_repair_can_clear_gets_no_reason(self):
         srt = "1\n00:00:01,000 --> 00:00:01,200\nShort\n"
         assert 1 not in m.explain_leftovers(srt)
+
+
+class TestTakeRepairedTrack:
+    """The operator leaves with the same file the second measure ran on."""
+
+    SRC = (
+        "1\n00:00:01,000 --> 00:00:01,200\nA long line of dialogue that needs more time\n\n"
+        "2\n00:00:05,000 --> 00:00:05,100\nAlso far too quick to read at all\n\n"
+        "3\n00:00:20,000 --> 00:00:22,000\nFine\n"
+    )
+
+    def _client(self, tmp_path):
+        import agent as agent_mod
+        import app as app_mod
+        from fastapi.testclient import TestClient
+
+        agent_mod.DATA_DIR = tmp_path
+        agent_mod.REPAIRED_FILES.clear()
+        return TestClient(app_mod.app), agent_mod
+
+    def _write(self, agent_mod, tmp_path):
+        repaired, _ = m.remediate_subtitles(self.SRC)
+        p = tmp_path / "iron_mask_repaired.srt"
+        p.write_text(repaired, encoding="utf-8")
+        agent_mod.REPAIRED_FILES[p.name] = agent_mod._download_name(
+            "The Iron Mask (1929)", "iron_mask"
+        )
+        return repaired
+
+    def test_download_is_the_repaired_file_not_the_source(self, tmp_path):
+        client, agent_mod = self._client(tmp_path)
+        repaired = self._write(agent_mod, tmp_path)
+
+        r = client.get("/repaired/iron_mask_repaired.srt")
+        assert r.status_code == 200
+        body = r.text
+        assert body.strip(), "empty 200 is not a download"
+
+        # the source and the repaired file differ in cue out-times; the bytes
+        # served must carry the repaired timings, so a source-file regression
+        # (or a stale copy) fails here.
+        assert body != self.SRC
+        got = m.parse_srt(body)
+        want = m.parse_srt(repaired)
+        assert len(got) == len(want)
+        assert [c["end"] for c in got] == [c["end"] for c in want]
+        src = m.parse_srt(self.SRC)
+        assert [c["end"] for c in got] != [c["end"] for c in src]
+
+        # and the served bytes measure the same as the after-report the UI shows
+        assert (m.measure_subtitles(body).summary()
+                == m.measure_subtitles(repaired).summary())
+
+    def test_attachment_headers_carry_the_title(self, tmp_path):
+        client, agent_mod = self._client(tmp_path)
+        self._write(agent_mod, tmp_path)
+        r = client.get("/repaired/iron_mask_repaired.srt")
+        cd = r.headers["content-disposition"]
+        assert "attachment" in cd
+        assert "The_Iron_Mask_1929_repaired.srt" in cd
+        assert r.headers["content-type"].startswith("text/x-subrip")
+
+    def test_unknown_and_traversal_are_404(self, tmp_path):
+        client, agent_mod = self._client(tmp_path)
+        self._write(agent_mod, tmp_path)
+        (tmp_path.parent / "secret.srt").write_text("nope", encoding="utf-8")
+        for name in (
+            "nothing_here.srt",
+            "../secret.srt",
+            "..%2Fsecret.srt",
+            "/etc/passwd",
+        ):
+            assert client.get(f"/repaired/{name}").status_code == 404
+
+    def test_missing_file_after_write_is_404(self, tmp_path):
+        client, agent_mod = self._client(tmp_path)
+        self._write(agent_mod, tmp_path)
+        (tmp_path / "iron_mask_repaired.srt").unlink()
+        assert client.get("/repaired/iron_mask_repaired.srt").status_code == 404
