@@ -31,6 +31,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import parallel_spec
+
 logger = logging.getLogger(__name__)
 
 SEED_DIR = Path(__file__).resolve().parent / "data" / "runs"
@@ -348,6 +350,11 @@ def get_run(run_id: str) -> dict | None:
             "min_duration_s": spec.get("min_duration_s"),
             "max_line_chars": spec.get("max_line_chars"),
             "max_lines": spec.get("max_lines"),
+            # A run stored before a rule existed did not measure that rule. It
+            # reads back as None and joins `not_verifiable` below, never as a
+            # value and never as a clean check, which is the same discipline a
+            # live run applies to a page that stays silent.
+            "min_gap_s": spec.get("min_gap_s"),
             "citation_url": spec.get("source_url", ""),
             "citation_title": spec.get("source_label", ""),
             "scope": spec.get("scope", ""),
@@ -366,7 +373,14 @@ def get_run(run_id: str) -> dict | None:
             # A threshold whose provenance is not "live" must be labelled on
             # screen; an unverified one means its check did not run.
             "provenance": spec.get("provenance", {}),
-            "not_verifiable": spec.get("not_verifiable", []),
+            "not_verifiable": sorted(
+                set(spec.get("not_verifiable", []))
+                | {
+                    name
+                    for name in parallel_spec.THRESHOLD_NAMES
+                    if spec.get(name) is None
+                }
+            ),
             "source_urls": spec.get("source_urls", []),
         },
         "totals": {

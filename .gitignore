@@ -29,3 +29,6 @@ JCODE-STEER.md
 
 # internal status board, never shipped to judges
 .progress/
+
+# private board, symlinked for the local win-conditions gate, never shipped
+docs/WIN-CONDITIONS.md
