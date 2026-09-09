@@ -105,8 +105,14 @@ Without API keys, the tool raises rather than measuring against constants it did
 
 ```bash
 pytest tests.py -v
-# 28 tests, all pass. Every check goes both red and green.
+# 37 tests, all pass. Every check goes both red and green.
 # Mutation tests confirm thresholds actually flip the verdict.
+
+node tests_sheet_filter.js
+# The sheet filter, run against real iron_mask cues that include both
+# leftover and cleared rows. Fails if the default view shows a cleared cue,
+# or if a reason chip shows a row belonging to another reason.
+# Regenerate the fixture with: python make_sheet_fixture.py
 ```
 
 ---

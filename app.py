@@ -368,6 +368,41 @@ HTML = """<!DOCTYPE html>
       color: var(--text-3);
     }
 
+    /* ---- leftover filter chips ---- */
+    .chip-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border-hi);
+    }
+    .chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      background: transparent;
+      border: 1px solid var(--border-hi);
+      border-radius: 2px;
+      padding: 5px 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .chip span {
+      font-weight: 700;
+      color: var(--text-2);
+    }
+    .chip:hover { color: var(--text-2); }
+    .chip.on {
+      color: var(--bg);
+      background: var(--text);
+      border-color: var(--text);
+    }
+    .chip.on span { color: var(--bg); }
+
     .cue-row {
       display: grid;
       grid-template-columns: 52px 210px 1fr 72px 80px;
@@ -551,6 +586,41 @@ document.getElementById('known-body').addEventListener('click', e => {
 filmSel.addEventListener('change', () => { if (filmSel.value) identIn.value = ''; });
 identIn.addEventListener('input',  () => { if (identIn.value)  filmSel.value = ''; });
 
+// ---- leftover filter (pure, node-testable: see tests_sheet_filter.js) ----
+const REASON_NO_FREE_SPACE = 'no free space';
+const REASON_LINE_TOO_LONG = 'line too long';
+const REASON_BOXED_IN      = 'min duration boxed in';
+
+// One row per before-finding, tagged with the leftover reason repair left on it.
+// A row with no reason is a cue repair cleared.
+function buildRows(findings, reasons) {
+  return (findings || []).map(function(f) {
+    return { finding: f, reason: (reasons || {})[String(f.cue_index)] || '' };
+  });
+}
+
+// The single place that decides what a chip shows.
+function rowsForMode(rows, mode) {
+  if (mode === 'all')       return rows;
+  if (mode === 'leftover')  return rows.filter(function(r) { return r.reason !== ''; });
+  return rows.filter(function(r) { return r.reason === mode; });
+}
+
+function chipCounts(rows) {
+  return {
+    all:      rows.length,
+    leftover: rowsForMode(rows, 'leftover').length,
+    space:    rowsForMode(rows, REASON_NO_FREE_SPACE).length,
+    line:     rowsForMode(rows, REASON_LINE_TOO_LONG).length,
+    boxed:    rowsForMode(rows, REASON_BOXED_IN).length
+  };
+}
+
+// Leftovers are the product. Only fall back to all when nothing is still red.
+function defaultMode(rows) {
+  return rowsForMode(rows, 'leftover').length > 0 ? 'leftover' : 'all';
+}
+
 function setStatus(html) { statLine.innerHTML = html; }
 function esc(s) {
   return String(s)
@@ -650,53 +720,86 @@ function renderSheet(d) {
     + '<span class="sum-stat"><span class="sum-n mint">' + changed + '</span> retimed</span>'
     + '</div>';
 
-  // cue rows from findings
-  var findings = b.findings || [];
+  // cue rows from findings, tagged with the leftover reason from this run
+  var allRows = buildRows(b.findings, why);
   var rowsHtml = '';
 
-  if (findings.length === 0) {
+  if (allRows.length === 0) {
     rowsHtml = '<div class="no-violations">No violations found</div>';
   } else {
+    var counts = chipCounts(allRows);
+    var chipHtml = '<div class="chip-bar" id="chip-bar">'
+      + chip('leftover', 'still red',  counts.leftover)
+      + chip(REASON_NO_FREE_SPACE, 'no free space', counts.space)
+      + chip(REASON_LINE_TOO_LONG, 'line too long', counts.line)
+      + chip(REASON_BOXED_IN, 'boxed in', counts.boxed)
+      + chip('all', 'all', counts.all)
+      + '</div>';
+
     var header = '<div class="sheet-header">'
       + '<span>#</span><span>TIMECODE</span><span>TEXT</span>'
       + '<span style="text-align:right">MEASURED</span><span>CHECK</span>'
       + '</div>';
 
-    var rows = findings.map(function(f) {
-      var classification = cls[String(f.cue_index)] || '';
-      var repaired = classification === 'auto_fixable';
-      var rowCls   = repaired ? 'repaired' : 'illegal';
-      var dotCls   = repaired ? 'repaired' : '';
-      var valCls   = repaired ? 'mint' : 'red';
-      var val      = typeof f.value === 'number' ? f.value.toFixed(2) : String(f.value);
-      var thresh   = typeof f.threshold === 'number'
-        ? f.threshold.toFixed(f.check === 'min_duration' ? 3 : 0)
-        : String(f.threshold);
-      var checkLbl = f.check === 'reading_speed' ? 'CPS'
-                   : f.check === 'min_duration'  ? 'DUR'
-                   : f.check === 'line_length'   ? 'LEN'
-                   : f.check.toUpperCase().slice(0, 4);
-      var idx = String(f.cue_index);
-      while (idx.length < 4) idx = '0' + idx;
-      var reason = why[String(f.cue_index)] || '';
-      var reasonHtml = reason
-        ? '<div class="cue-why">' + esc(reason) + '</div>' : '';
-
-      return '<div class="cue-row ' + rowCls + '">'
-        + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
-        + '<div class="cue-tc">' + esc(f.timecode || '') + '</div>'
-        + '<div class="cue-text">' + esc(f.text_preview || '') + reasonHtml + '</div>'
-        + '<div class="cue-val ' + valCls + '">' + val
-        + '<small>' + esc(f.unit) + '</small></div>'
-        + '<div class="cue-check">' + checkLbl
-        + '<span>lim ' + thresh + '</span></div>'
-        + '</div>';
-    }).join('');
-
-    rowsHtml = header + rows;
+    rowsHtml = chipHtml + header + '<div id="cue-rows"></div>';
   }
 
   mainArea.innerHTML = specHtml + verdict + strip + rowsHtml;
+  if (allRows.length === 0) return;
+
+  // Render is local from here. No /run, no model call: chips slice allRows.
+  var host = document.getElementById('cue-rows');
+  function paint(mode) {
+    var visible = rowsForMode(allRows, mode);
+    host.innerHTML = visible.length
+      ? visible.map(function(r) { return rowHtml(r, cls); }).join('')
+      : '<div class="no-violations">No cues in this category</div>';
+    var bar = document.getElementById('chip-bar');
+    Array.prototype.forEach.call(bar.children, function(el) {
+      el.classList.toggle('on', el.dataset.mode === mode);
+    });
+  }
+  document.getElementById('chip-bar').addEventListener('click', function(e) {
+    var el = e.target.closest('.chip');
+    if (el) paint(el.dataset.mode);
+  });
+  paint(defaultMode(allRows));
+}
+
+function chip(mode, label, n) {
+  return '<button class="chip" type="button" data-mode="' + esc(mode) + '">'
+    + esc(label) + '<span>' + n + '</span></button>';
+}
+
+function rowHtml(r, cls) {
+  var f = r.finding;
+  var classification = cls[String(f.cue_index)] || '';
+  var repaired = classification === 'auto_fixable';
+  var rowCls   = repaired ? 'repaired' : 'illegal';
+  var dotCls   = repaired ? 'repaired' : '';
+  var valCls   = repaired ? 'mint' : 'red';
+  var val      = typeof f.value === 'number' ? f.value.toFixed(2) : String(f.value);
+  var thresh   = typeof f.threshold === 'number'
+    ? f.threshold.toFixed(f.check === 'min_duration' ? 3 : 0)
+    : String(f.threshold);
+  var checkLbl = f.check === 'reading_speed' ? 'CPS'
+               : f.check === 'min_duration'  ? 'DUR'
+               : f.check === 'line_length'   ? 'LEN'
+               : f.check.toUpperCase().slice(0, 4);
+  var idx = String(f.cue_index);
+  while (idx.length < 4) idx = '0' + idx;
+  var reasonHtml = r.reason
+    ? '<div class="cue-why">' + esc(r.reason) + '</div>' : '';
+
+  return '<div class="cue-row ' + rowCls + '">'
+    + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
+    + '<div class="cue-tc">' + esc(f.timecode || '') + '</div>'
+    + '<div class="cue-text">' + esc(f.text_preview || '') + reasonHtml + '</div>'
+    + '<div class="cue-val ' + valCls + '">' + val
+    + '<small>' + esc(f.unit) + '</small></div>'
+    + '<div class="cue-check">' + checkLbl
+    + '<span>lim ' + thresh + '</span></div>'
+    + '</div>';
 }
 </script>
 </body>

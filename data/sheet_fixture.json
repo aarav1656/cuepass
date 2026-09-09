@@ -1,0 +1,155 @@
+{
+  "before": {
+    "cue_count": 12,
+    "total_violations": 11,
+    "over_cps_count": 2,
+    "under_duration_count": 6,
+    "over_line_chars_count": 3,
+    "over_line_count": 0,
+    "passed": false,
+    "spec_platform": "Netflix (default)",
+    "spec_source_url": "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617",
+    "spec_source_label": "Netflix Timed Text Style Guide (default constants)",
+    "spec_is_cached": true,
+    "max_cps": 17.0,
+    "min_duration_s": 0.8333333333333334,
+    "max_line_chars": 42,
+    "max_lines": 2,
+    "findings": [
+      {
+        "cue_index": 2,
+        "check": "line_length",
+        "value": 43.0,
+        "threshold": 42.0,
+        "unit": "chars",
+        "timecode": "00:00:00,934 --> 00:00:06,764",
+        "text_preview": "Eminence must endure the cardinal two story she. Is the grea",
+        "auto_fixable": false
+      },
+      {
+        "cue_index": 3,
+        "check": "line_length",
+        "value": 43.0,
+        "threshold": 42.0,
+        "unit": "chars",
+        "timecode": "00:00:06,864 --> 00:00:13,514",
+        "text_preview": "day and manipulates the strings which guide the king. Is the",
+        "auto_fixable": false
+      },
+      {
+        "cue_index": 4,
+        "check": "line_length",
+        "value": 45.0,
+        "threshold": 42.0,
+        "unit": "chars",
+        "timecode": "00:00:13,614 --> 00:00:19,574",
+        "text_preview": "coming and often roof. Still no one questions his devotion t",
+        "auto_fixable": false
+      },
+      {
+        "cue_index": 5,
+        "check": "reading_speed",
+        "value": 22.63,
+        "threshold": 17.0,
+        "unit": "chars/sec",
+        "timecode": "00:00:19,674 --> 00:00:21,574",
+        "text_preview": "On this most precious morning the King pays",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 6,
+        "check": "reading_speed",
+        "value": 22.43,
+        "threshold": 17.0,
+        "unit": "chars/sec",
+        "timecode": "00:00:21,674 --> 00:00:24,884",
+        "text_preview": "Alice had threatened to continuously attentions with the pre",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 7,
+        "check": "min_duration",
+        "value": 0.23,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:00:24,984 --> 00:00:25,214",
+        "text_preview": "he has",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 8,
+        "check": "min_duration",
+        "value": 0.28,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:00:25,314 --> 00:00:25,594",
+        "text_preview": "Dice",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 9,
+        "check": "min_duration",
+        "value": 0.55,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:00:25,694 --> 00:00:26,244",
+        "text_preview": "the set the day of",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 10,
+        "check": "min_duration",
+        "value": 0.3,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:00:26,344 --> 00:00:26,644",
+        "text_preview": "In the.",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 11,
+        "check": "min_duration",
+        "value": 0.3,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:00:56,644 --> 00:00:56,944",
+        "text_preview": "In the.",
+        "auto_fixable": true
+      },
+      {
+        "cue_index": 12,
+        "check": "min_duration",
+        "value": 0.3,
+        "threshold": 0.8333333333333334,
+        "unit": "seconds",
+        "timecode": "00:01:26,944 --> 00:01:27,244",
+        "text_preview": "In. The OR.",
+        "auto_fixable": true
+      }
+    ]
+  },
+  "leftover_reasons": {
+    "2": "line too long",
+    "3": "line too long",
+    "4": "line too long",
+    "5": "no free space",
+    "6": "no free space",
+    "7": "min duration boxed in",
+    "8": "min duration boxed in",
+    "9": "min duration boxed in",
+    "10": "no free space"
+  },
+  "classification": {
+    "2": "needs_review",
+    "3": "needs_review",
+    "4": "needs_review",
+    "5": "needs_review",
+    "6": "needs_review",
+    "7": "needs_review",
+    "8": "needs_review",
+    "9": "needs_review",
+    "10": "needs_review",
+    "11": "auto_fixable",
+    "12": "auto_fixable"
+  }
+}
