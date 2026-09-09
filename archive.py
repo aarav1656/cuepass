@@ -18,7 +18,7 @@ ARCHIVE_DL = "https://archive.org/download"
 VIDEO_EXT = (".mp4", ".m4v", ".ogv", ".mpeg", ".avi")
 SUBTITLE_EXT = (".srt", ".vtt")
 
-# Films that carry a real subtitle track — 2,407 of 28,423 feature films.
+# Films that carry a real subtitle track: 2,407 of 28,423 feature films.
 DEFAULT_QUERY = "collection:feature_films AND mediatype:movies AND format:(SubRip)"
 
 

@@ -1,20 +1,28 @@
-"""Fetch live caption delivery specs from the open web via Parallel Search.
+"""Caption delivery specs, read off the buyer's own published page at runtime.
 
-This module is LOAD-BEARING: delete it and the tool raises immediately.
-There is no silent fallback. The Parallel track requires runtime use of the
-Parallel Search API, and a working tool that silently degrades to hardcoded
-thresholds would be decorative, not load-bearing.
+Two Parallel surfaces, in a chain, both load-bearing:
 
-Parallel Search is used at runtime to:
-1. Find the current published spec page for the chosen platform.
-2. Extract the actual numeric thresholds (chars/sec, min/max duration, line length).
-3. Return the source URL so the UI can cite it.
+  1. `client.search(...)`  finds candidate spec pages. Search is allowed to
+     return URLs. Search is NOT allowed to produce a number: a snippet that
+     says "17 characters per second" could have come from a 2019 blog post.
+  2. `client.extract(urls=[...], session_id=...)`  pulls the actual page and
+     returns it as markdown. Every threshold Cuepass measures against is read
+     out of that extracted page text, and every threshold carries the verbatim
+     sentence it was read from plus the URL that sentence lives on.
 
-API used: parallel.Parallel.search(search_queries=[...]) from the parallel-web SDK.
-Result shape: SearchResult.results -> list[WebSearchResult]
-  - WebSearchResult.url: str
-  - WebSearchResult.title: Optional[str]
-  - WebSearchResult.excerpts: list[str]  (markdown-formatted excerpts)
+The `session_id` returned by Search is passed into Extract, which is how the
+Parallel SDK links the two calls as one piece of agent work.
+
+If Extract cannot produce a page that states a reading-speed rule, this module
+raises. There is no fallback to a constant. A number with no clause behind it
+is a rumour, and Cuepass would be citing a spec it never read.
+
+No language model is ever asked what a threshold is. The model (see
+`cuepass_agents.py`) decides WHICH page is authoritative and when to try
+another candidate. `read_page_thresholds` does the reading, in Python, and
+records the result in a per-process ledger keyed by URL. The agent can only
+accept a URL that is already in that ledger, so a hallucinated number cannot
+reach a measurement.
 """
 
 from __future__ import annotations
@@ -22,88 +30,345 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 
 class ParallelUnavailableError(Exception):
-    """Raised when Parallel Search cannot be used.
+    """Raised when the Parallel chain cannot produce a cited spec.
 
-    This is a hard failure, not a recoverable condition. The Parallel track
-    requires runtime use of the Search API. Silent degradation to hardcoded
-    constants would make the integration decorative.
+    Hard failure, never a downgrade. The Parallel track requires runtime use of
+    the Search API, and a tool that silently swapped in hardcoded constants
+    would be citing a page it never opened.
     """
 
 
-# Reference constants used ONLY for sanity-checking extracted values.
-# Never returned directly to the caller; use fetch_spec() which requires Parallel.
-_REFERENCE_SPECS: dict[str, dict] = {
-    "netflix": {
-        "platform": "Netflix",
-        "max_cps": 17.0,
-        "min_duration_s": 5 / 6,
-        "max_line_chars": 42,
-        "max_lines": 2,
-        "source_url": "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617",
-    },
-    "amazon": {
-        "platform": "Amazon Prime Video",
-        "max_cps": 17.0,
-        "min_duration_s": 0.5,
-        "max_line_chars": 42,
-        "max_lines": 2,
-        "source_url": "https://videodirect.amazon.com/home/help",
-    },
-    "bbc": {
-        "platform": "BBC",
-        "max_cps": 17.0,
-        "min_duration_s": 0.5,
-        "max_line_chars": 40,
-        "max_lines": 2,
-        "source_url": "https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/",
-    },
-    "fcc": {
-        "platform": "FCC (US broadcast)",
-        "max_cps": 17.0,
-        "min_duration_s": 0.5,
-        "max_line_chars": 32,
-        "max_lines": 4,
-        "source_url": "https://www.fcc.gov/consumers/guides/captioning-internet-video-programming",
-    },
+# Where each buyer publishes its own spec. Used to rank candidates and to
+# reject a third-party summary standing in for the buyer's own page. These are
+# hosts, not thresholds: no number in this file is ever measured against.
+OFFICIAL_HOSTS: dict[str, tuple[str, ...]] = {
+    "netflix_en_us": ("partnerhelp.netflixstudios.com", "help.netflix.com", "netflix.com"),
+    "netflix_templates": (
+        "partnerhelp.netflixstudios.com",
+        "help.netflix.com",
+        "netflix.com",
+    ),
+    "amazon": ("videodirect.amazon.com", "amazon.com", "aws.amazon.com"),
+    "bbc": ("bbc.co.uk", "bbc.com", "bbc.github.io"),
+    "fcc": ("fcc.gov",),
 }
 
-# Queries designed to land on the published spec pages, not marketing copy
+PLATFORM_LABELS: dict[str, str] = {
+    "netflix_en_us": "Netflix, English (USA)",
+    "netflix_templates": "Netflix, Subtitle Templates",
+    "amazon": "Amazon Prime Video",
+    "bbc": "BBC",
+    "fcc": "FCC (US broadcast)",
+}
+
+# What each profile is the spec FOR. Shown wherever its number is shown, because
+# two Netflix profiles stating different reading speeds is not Netflix
+# contradicting itself: they are different scopes, and saying which one applies
+# is the difference between a finding and a cheap shot.
+PROFILE_SCOPE: dict[str, str] = {
+    "netflix_en_us": (
+        "Netflix's English (USA) Timed Text Style Guide, the guide an English "
+        "language subtitle file for the US catalogue is held to."
+    ),
+    "netflix_templates": (
+        "Netflix's Timed Text Style Guide page on subtitle templates, which is "
+        "the guide a template-derived delivery is held to."
+    ),
+    "amazon": "Amazon Prime Video's published subtitle delivery specification.",
+    "bbc": "The BBC's published subtitle guidelines.",
+    "fcc": "The FCC's published closed-captioning quality rules for US broadcast.",
+}
+
+# The page each profile is defined by. This is a starting candidate, not an
+# answer: the desk still opens it with Parallel Extract and the numbers still
+# come off the page text with their clause. No threshold is written down here,
+# and a profile whose page stops publishing a number reports that rather than
+# falling back to the other profile's figure.
+PROFILE_SEED_URLS: dict[str, str] = {
+    "netflix_en_us": (
+        "https://partnerhelp.netflixstudios.com/hc/en-us/articles/"
+        "217350977-English-Timed-Text-Style-Guide"
+    ),
+    "netflix_templates": (
+        "https://partnerhelp.netflixstudios.com/hc/en-us/articles/"
+        "219375728-Timed-Text-Style-Guide-Subtitle-Templates"
+    ),
+}
+
+# Parallel's Search guidance: concise keyword queries, 3-6 words, two or three
+# of them, with the intent carried by `objective` rather than by operators.
 PLATFORM_QUERIES: dict[str, list[str]] = {
-    "netflix": [
-        'Netflix "Timed Text Style Guide" subtitle characters per second limit',
-        "Netflix TTSS subtitle spec max reading speed characters per second",
+    "netflix_en_us": [
+        "Netflix English timed text style guide",
+        "Netflix subtitle reading speed limit",
+        "Netflix subtitle character limit line",
+    ],
+    "netflix_templates": [
+        "Netflix timed text style guide subtitle templates",
+        "Netflix subtitle template reading speed",
+        "Netflix subtitle template character limit",
     ],
     "amazon": [
-        "Amazon Prime Video subtitle delivery specification characters per second line length",
-        "Amazon Video Direct subtitle style guide reading speed",
+        "Amazon Prime Video subtitle specification",
+        "Amazon video direct timed text guide",
+        "Prime Video caption reading speed",
     ],
     "bbc": [
-        "BBC subtitle style guide characters per second line length specification",
-        "BBC Ofcom subtitle specification reading speed",
+        "BBC subtitle guidelines reading speed",
+        "BBC subtitle line length guidance",
+        "BBC subtitle guidelines characters second",
     ],
     "fcc": [
-        "FCC caption quality rules characters per second reading speed",
-        "FCC closed caption standards synchronicity accuracy",
+        "FCC closed captioning quality rules",
+        "FCC caption standards accuracy synchronicity",
+        "FCC captioning requirements broadcasters",
     ],
 }
 
-# Patterns to extract thresholds from web text
-_CPS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*characters?\s*per\s*second", re.I)
-_LINE_CHARS_RE = re.compile(r"(\d{2,3})\s*characters?\s*(?:per\s*)?line", re.I)
-_MAX_LINES_RE = re.compile(r"(?:maximum|max)\s+(\d)\s*lines?", re.I)
+PLATFORM_OBJECTIVES: dict[str, str] = {
+    p: (
+        f"Find the page where {PLATFORM_LABELS[p]} publishes its own subtitle or "
+        "closed-caption delivery specification, stating the maximum reading speed "
+        "in characters per second, the maximum characters per subtitle line, the "
+        "maximum number of lines per subtitle, and the minimum duration a "
+        "subtitle stays on screen."
+    )
+    for p in PLATFORM_LABELS
+}
 
 
-def _is_citable_url(url: str) -> bool:
-    """True only for a URL a reviewer can actually click through to.
+# --- deterministic reading of an extracted page --------------------------
+#
+# Every pattern below captures the number AND enough surrounding text that the
+# sentence it came from can be quoted back. A threshold whose sentence cannot
+# be located is not returned.
 
-    Rejects non-http schemes, missing hosts, and the mangled-path case where a
-    local filesystem path has been spliced into the URL by the upstream index.
+_CPS_PATTERNS = [
+    re.compile(
+        r"(\d{1,2}(?:\.\d)?)\s*(?:characters?|chars?)\s*(?:per\s*|/\s*|a\s+)second", re.I
+    ),
+    re.compile(r"(\d{1,2}(?:\.\d)?)\s*cps\b", re.I),
+    re.compile(r"reading\s+speed[^.\n]{0,80}?(\d{1,2}(?:\.\d)?)\s*(?:characters?|chars?|cps)", re.I),
+]
+_LINE_CHARS_PATTERNS = [
+    re.compile(r"(\d{2,3})\s*(?:characters?|chars?)\s*(?:per\s*|a\s+|/\s*)?line", re.I),
+    re.compile(r"line\s+length[^.\n]{0,60}?(\d{2,3})\s*(?:characters?|chars?)", re.I),
+    re.compile(
+        r"(?:maximum|max\.?|no more than|up to)[^.\n]{0,30}?(\d{2,3})\s*(?:characters?|chars?)",
+        re.I,
+    ),
+    re.compile(r"(\d{2,3})\s*(?:characters?|chars?)[^.\n]{0,20}?(?:per|a)\s+(?:subtitle\s+)?line", re.I),
+]
+_MAX_LINES_PATTERNS = [
+    re.compile(r"(?:maximum|max\.?|no more than|up to)\s*(?:of\s*)?(\d)\s*lines?\b", re.I),
+    re.compile(r"(\d)\s*lines?\s*(?:per\s+(?:subtitle|caption|cue)|maximum|max\b)", re.I),
+    re.compile(r"(?:limit(?:ed)?\s+to|restrict(?:ed)?\s+to)\s*(\d)\s*lines?", re.I),
+]
+# Minimum on-screen duration is published three ways: in seconds, as a vulgar
+# fraction of a second ("5/6 of a second", which is how the Netflix guide states
+# it), or in frames. All three are read; frames convert at 24fps, the rate the
+# repair step already assumes for its one-frame gap.
+_MIN_DURATION_FRACTION = re.compile(
+    r"(\d)\s*/\s*(\d)\s*(?:of\s+a\s+)?(?:second|sec)\b", re.I
+)
+_MIN_DURATION_PATTERNS = [
+    re.compile(
+        r"minimum[^.\n]{0,40}?duration[^.\n]{0,60}?(\d+(?:\.\d+)?)\s*(seconds?|secs?|frames?|ms)",
+        re.I,
+    ),
+    re.compile(
+        r"(\d+(?:\.\d+)?)\s*(seconds?|secs?|frames?)[^.\n]{0,30}?minimum\s+duration", re.I
+    ),
+    re.compile(r"minimum[^.\n]{0,50}?(\d+)\s*(frames?)\b", re.I),
+    re.compile(r"(?:on\s*screen|display(?:ed)?)[^.\n]{0,40}?at\s+least\s+(\d+(?:\.\d+)?)\s*(seconds?|frames?)", re.I),
+]
+
+# Plausibility bands. A page that yields a number outside its band was misread,
+# so the threshold is dropped rather than measured against.
+_BANDS = {
+    "max_cps": (5.0, 40.0),
+    "max_line_chars": (20.0, 100.0),
+    "max_lines": (1.0, 6.0),
+    "min_duration_s": (0.2, 5.0),
+}
+
+# A number is not a rule just because it is the right size. The sentence it was
+# read from has to be about the thing being measured. This caught a real
+# regression: on the BBC subtitle guide, "Translator's Name |TN |[Up to 32
+# characters] |Optional |Jane Doe" is a metadata table row about a name field,
+# and it was being accepted as a 32-character line-length limit and measured
+# against. A clause that does not mention lines is not a line-length rule.
+_CLAUSE_MUST_MENTION = {
+    "max_cps": ("second", "cps", "reading speed"),
+    "max_line_chars": ("line",),
+    "max_lines": ("line",),
+    "min_duration_s": ("duration", "frame", "second", "on screen", "on-screen"),
+}
+
+# Words that mean the sentence is about something other than the subtitle text
+# itself, however well the numbers fit.
+_CLAUSE_MUST_NOT_MENTION = ("translator", "filename", "file name", "email", "url")
+
+
+def _clause_is_about(name: str, clause: str) -> bool:
+    lowered = clause.lower()
+    if any(bad in lowered for bad in _CLAUSE_MUST_NOT_MENTION):
+        return False
+    required = _CLAUSE_MUST_MENTION.get(name, ())
+    return any(word in lowered for word in required)
+
+
+def _sentence_around(text: str, match_start: int, match_end: int) -> str:
+    """The sentence a match sits in, trimmed for display in a citation."""
+    left = max(
+        text.rfind(". ", 0, match_start),
+        text.rfind("\n", 0, match_start),
+        text.rfind("| ", 0, match_start),
+    )
+    start = 0 if left < 0 else left + 1
+    right_candidates = [
+        i for i in (text.find(". ", match_end), text.find("\n", match_end)) if i != -1
+    ]
+    end = min(right_candidates) + 1 if right_candidates else min(len(text), match_end + 160)
+    clause = " ".join(text[start:end].split())
+    clause = clause.strip(" |*#-")
+    if len(clause) > 240:
+        # Keep the number visible when a table row is long.
+        rel = match_start - start
+        lo = max(0, rel - 110)
+        clause = clause[lo : lo + 240].strip()
+    return clause
+
+
+def _first_hit(text: str, patterns: list[re.Pattern], name: str) -> tuple[float, str] | None:
+    """The first match on this page whose sentence is actually about `name`.
+
+    Every match of every pattern is considered, not just the first, because the
+    first number of the right shape on a long page is often in an unrelated
+    table. A match is only taken when its own sentence passes the topic check.
+    """
+    for pat in patterns:
+        for m in pat.finditer(text):
+            clause = _sentence_around(text, m.start(), m.end())
+            if _clause_is_about(name, clause):
+                return float(m.group(1)), clause
+    return None
+
+
+def _read_min_duration(text: str) -> tuple[float, str] | None:
+    """Minimum on-screen duration, normalised to seconds."""
+    for m in _MIN_DURATION_FRACTION.finditer(text):
+        numerator, denominator = float(m.group(1)), float(m.group(2))
+        clause = _sentence_around(text, m.start(), m.end())
+        if denominator > 0 and _clause_is_about("min_duration_s", clause):
+            return numerator / denominator, clause
+    for pat in _MIN_DURATION_PATTERNS:
+        for m in pat.finditer(text):
+            clause = _sentence_around(text, m.start(), m.end())
+            if not _clause_is_about("min_duration_s", clause):
+                continue
+            value = float(m.group(1))
+            unit = (m.group(2) if m.lastindex and m.lastindex >= 2 else "seconds").lower()
+            if unit.startswith("frame"):
+                value = value / 24.0
+            elif unit == "ms":
+                value = value / 1000.0
+            return value, clause
+    return None
+
+
+def read_page_thresholds(page_text: str, url: str) -> dict:
+    """Read caption thresholds out of one extracted page. Pure Python.
+
+    Returns a dict of threshold name -> {"value", "clause", "url"} for every
+    threshold this page actually states, plus "found" listing them. A threshold
+    the page does not state is absent, not guessed.
+    """
+    text = page_text or ""
+    readers = {
+        "max_cps": lambda: _first_hit(text, _CPS_PATTERNS, "max_cps"),
+        "max_line_chars": lambda: _first_hit(text, _LINE_CHARS_PATTERNS, "max_line_chars"),
+        "max_lines": lambda: _first_hit(text, _MAX_LINES_PATTERNS, "max_lines"),
+        "min_duration_s": lambda: _read_min_duration(text),
+    }
+    out: dict[str, dict] = {}
+    for name, reader in readers.items():
+        hit = reader()
+        if not hit:
+            continue
+        value, clause = hit
+        lo, hi = _BANDS[name]
+        if not (lo <= value <= hi):
+            logger.info("dropping %s=%s from %s: outside band %s", name, value, url, _BANDS[name])
+            continue
+        out[name] = {"value": value, "clause": clause, "url": url}
+    return {"url": url, "thresholds": out, "found": sorted(out)}
+
+
+# --- the per-run evidence ledger -----------------------------------------
+#
+# Thresholds only ever enter a measurement through this ledger. The model is
+# given the URL, never the number, so the number it would have to invent is one
+# it is never shown and can never write into the result.
+
+_LEDGER: dict[str, dict] = {}
+_LEDGER_LOCK = threading.Lock()
+
+
+def ledger_put(entry: dict) -> None:
+    with _LEDGER_LOCK:
+        _LEDGER[entry["url"]] = entry
+
+
+def ledger_get(url: str) -> dict | None:
+    with _LEDGER_LOCK:
+        return _LEDGER.get(url)
+
+
+def ledger_urls() -> list[str]:
+    with _LEDGER_LOCK:
+        return list(_LEDGER)
+
+
+def ledger_clear() -> None:
+    with _LEDGER_LOCK:
+        _LEDGER.clear()
+
+
+# --- the two Parallel calls ----------------------------------------------
+
+
+def _client():
+    try:
+        import parallel as parallel_sdk  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise ParallelUnavailableError(
+            "parallel-web is not installed. pip install parallel-web"
+        ) from exc
+
+    api_key = os.environ.get("PARALLEL_API_KEY", "")
+    if not api_key:
+        raise ParallelUnavailableError(
+            "PARALLEL_API_KEY is not set. Cuepass measures against a spec page it "
+            "fetched this run, so without Parallel there is no spec to measure against."
+        )
+    return parallel_sdk.Parallel(api_key=api_key)
+
+
+def is_citable_url(url: str) -> bool:
+    """True only for a URL a reviewer can click and land on the cited page.
+
+    Rejects non-http schemes, missing hosts, and the mangled case where an
+    upstream index spliced a local build path into the URL. A real observed
+    result was `https://subtitlesedit.com/blog/netflix-subtitle-s:Users:kevin
+    rato:Desktop:...mdxtyle-guide-explained`. Cuepass never renders that.
     """
     if not url:
         return False
@@ -115,128 +380,296 @@ def _is_citable_url(url: str) -> bool:
     return True
 
 
-def _run_parallel_search(platform: str) -> dict:
-    """Run a live Parallel Search and extract thresholds.
+def search_spec_candidates(platform: str) -> dict:
+    """Parallel Search: candidate spec pages for one buyer. Returns URLs only.
 
-    Raises ParallelUnavailableError on any failure. No silent fallback.
+    Args:
+        platform: buyer key, one of netflix, amazon, bbc, fcc.
+
+    Returns:
+        A dict with `candidates` (url, title, snippet, is_official), the
+        `session_id` to carry into extract, and the queries that were sent.
     """
-    try:
-        import parallel as parallel_sdk  # type: ignore[import-untyped]
-    except ImportError:
-        raise ParallelUnavailableError(
-            "parallel-web package not installed. "
-            "Install with: pip install parallel-web"
-        )
-
-    api_key = os.environ.get("PARALLEL_API_KEY", "")
-    if not api_key:
-        raise ParallelUnavailableError(
-            "PARALLEL_API_KEY environment variable is not set. "
-            "Sign up at https://parallel.ai to get a free API key ($20-80 credits). "
-            "The Parallel track requires runtime use of the Search API."
-        )
-
-    queries = PLATFORM_QUERIES.get(
-        platform,
-        [f"{platform} subtitle delivery specification reading speed characters per second"],
+    platform = platform.lower()
+    queries = PLATFORM_QUERIES.get(platform, [f"{platform} subtitle specification"])
+    objective = PLATFORM_OBJECTIVES.get(
+        platform, f"Find {platform}'s published subtitle delivery specification."
     )
-
+    client = _client()
     try:
-        client = parallel_sdk.Parallel(api_key=api_key)
         result = client.search(
             search_queries=queries,
+            objective=objective,
             mode="fast",
-            objective=(
-                f"Find the current {platform} caption/subtitle delivery specification, "
-                "specifically the maximum reading speed in characters per second, "
-                "maximum line length in characters, and minimum cue duration."
-            ),
+            client_model="gemini-2.5-flash",
         )
-        search_results = result.results  # list[WebSearchResult]
     except Exception as exc:
-        raise ParallelUnavailableError(
-            f"Parallel Search API call failed: {exc}. "
-            "Check your PARALLEL_API_KEY and network connectivity."
-        ) from exc
+        raise ParallelUnavailableError(f"Parallel Search failed for {platform}: {exc}") from exc
 
-    if not search_results:
-        raise ParallelUnavailableError(
-            f"Parallel Search returned no results for platform '{platform}'. "
-            "The search completed but found no matching spec pages."
-        )
-
-    # Aggregate text from all results to maximise coverage of numeric thresholds
-    all_text = ""
-    source_url = ""
-    source_label = ""
-    raw_results: list[dict] = []
-
-    ref = _REFERENCE_SPECS.get(platform, _REFERENCE_SPECS["netflix"])
-    official_host = urlparse(ref["source_url"]).netloc
-
-    for r in search_results:
+    hosts = OFFICIAL_HOSTS.get(platform, ())
+    candidates = []
+    for r in result.results:
         url = r.url or ""
-        title = r.title or url
-        excerpts_text = " ".join(r.excerpts or [])
-        all_text += f" {title} {excerpts_text}"
-        raw_results.append({"url": url, "title": title})
-
-    # The citation is shown to a reviewer as a clickable link, so it has to be a
-    # real, well-formed URL. Parallel occasionally returns a result whose URL has
-    # a local build path spliced into it (a real observed case:
-    # ".../netflix-subtitle-s:Users:kevinrato:Desktop:...mdxtyle-guide-explained").
-    # Prefer the platform's own domain, then any well-formed result, then the
-    # known-good reference URL. Never cite a URL we cannot vouch for.
-    citable = [
-        (r["url"], r["title"]) for r in raw_results if _is_citable_url(r["url"])
-    ]
-    first_party = [(u, t) for u, t in citable if urlparse(u).netloc == official_host]
-    for url, title in first_party + citable:
-        source_url, source_label = url, title
-        break
-
-    # Extract numeric thresholds from combined text
-    cps_match = _CPS_RE.search(all_text)
-    line_chars_match = _LINE_CHARS_RE.search(all_text)
-    max_lines_match = _MAX_LINES_RE.search(all_text)
-
-    max_cps = float(cps_match.group(1)) if cps_match else ref["max_cps"]
-    max_line_chars = (
-        int(line_chars_match.group(1)) if line_chars_match else ref["max_line_chars"]
-    )
-    max_lines = int(max_lines_match.group(1)) if max_lines_match else ref["max_lines"]
-
-    # Sanity-check extracted values; use reference per-field if they look wrong
-    if not (5.0 <= max_cps <= 50.0):
-        logger.warning(
-            "Extracted max_cps=%s looks implausible; using reference %s",
-            max_cps, ref["max_cps"],
+        if not is_citable_url(url):
+            continue
+        host = urlparse(url).netloc.lower()
+        candidates.append(
+            {
+                "url": url,
+                "title": r.title or url,
+                "snippet": " ".join(r.excerpts or [])[:300],
+                "is_official": any(host == h or host.endswith("." + h) for h in hosts),
+            }
         )
-        max_cps = ref["max_cps"]
+    # The page this profile is defined by, offered as a candidate so the desk can
+    # open it first. It is still only a URL: Extract has to open it and the
+    # numbers still come off the page text. If Search already surfaced it, it is
+    # not duplicated.
+    seed = PROFILE_SEED_URLS.get(platform)
+    if seed and not any(c["url"] == seed for c in candidates):
+        candidates.insert(
+            0,
+            {
+                "url": seed,
+                "title": f"{PLATFORM_LABELS.get(platform, platform)} (profile page)",
+                "snippet": PROFILE_SCOPE.get(platform, ""),
+                "is_official": True,
+                "is_profile_page": True,
+            },
+        )
 
+    if not candidates:
+        raise ParallelUnavailableError(
+            f"Parallel Search returned no usable spec page for {platform}."
+        )
+    # The profile's own page first, then official hosts. The desk still chooses;
+    # this only orders the menu it is choosing from.
+    candidates.sort(key=lambda c: (not c.get("is_profile_page"), not c["is_official"]))
     return {
-        "platform": ref["platform"],
-        "max_cps": max_cps,
-        "min_duration_s": ref["min_duration_s"],
-        "max_line_chars": max_line_chars,
-        "max_lines": max_lines,
-        "source_url": source_url or ref["source_url"],
-        "source_label": f"Parallel Search: {source_label}" if source_label else f"Parallel Search ({platform})",
-        "is_cached": False,
-        "raw_results": raw_results[:5],
+        "platform": platform,
+        "candidates": candidates[:6],
+        "session_id": result.session_id,
+        "search_id": result.search_id,
+        "queries": queries,
     }
 
 
-def fetch_spec(platform: str = "netflix") -> dict:
-    """Return the current caption delivery spec for the given platform.
+def extract_spec_page(platform: str, url: str, session_id: str = "") -> dict:
+    """Parallel Extract: pull one candidate page and read its thresholds.
 
-    Calls Parallel Search API at runtime. Raises ParallelUnavailableError
-    if the API is unavailable, the key is missing, or no results are found.
-    There is no silent fallback to hardcoded constants.
+    Search snippets are not evidence; this opens the page. Every threshold that
+    comes back carries the verbatim sentence it was read from. The result is
+    written to the evidence ledger under this URL, and only a ledger entry can
+    become a measurement.
 
-    The returned dict always contains:
-        platform, max_cps, min_duration_s, max_line_chars, max_lines,
-        source_url, source_label, is_cached
+    Args:
+        platform: buyer key, one of netflix, amazon, bbc, fcc.
+        url: the candidate page to open, from search_spec_candidates.
+        session_id: session id from the search call, linking the two calls.
+
+    Returns:
+        A dict with the thresholds this page states, each with its clause, plus
+        `found` (threshold names read) and `states_reading_speed`.
     """
     platform = platform.lower()
-    return _run_parallel_search(platform)
+    if not is_citable_url(url):
+        return {"url": url, "error": "not a citable url", "found": [], "thresholds": {}}
+    client = _client()
+    try:
+        response = client.extract(
+            urls=[url],
+            objective=PLATFORM_OBJECTIVES.get(platform, ""),
+            search_queries=PLATFORM_QUERIES.get(platform, [])[:2],
+            session_id=session_id or None,
+            advanced_settings={"full_content": {"max_chars_per_result": 120000}},
+        )
+    except Exception as exc:
+        raise ParallelUnavailableError(f"Parallel Extract failed for {url}: {exc}") from exc
+
+    if not response.results:
+        detail = response.errors[0].error_type if response.errors else "no result"
+        return {
+            "url": url,
+            "error": f"extract returned nothing ({detail})",
+            "found": [],
+            "thresholds": {},
+        }
+
+    r = response.results[0]
+    page_text = r.full_content or " ".join(r.excerpts or [])
+    read = read_page_thresholds(page_text, r.url or url)
+    entry = {
+        "url": r.url or url,
+        "title": r.title or url,
+        "publish_date": r.publish_date,
+        "thresholds": read["thresholds"],
+        "found": read["found"],
+        "extract_id": response.extract_id,
+        "session_id": response.session_id,
+        "chars_extracted": len(page_text),
+        "platform": platform,
+    }
+    ledger_put(entry)
+    return {
+        "url": entry["url"],
+        "title": entry["title"],
+        "found": entry["found"],
+        "states_a_measurable_rule": bool(entry["thresholds"]),
+        "states_reading_speed": "max_cps" in entry["thresholds"],
+        "chars_extracted": entry["chars_extracted"],
+        "extract_id": entry["extract_id"],
+        # The clauses go to the model as evidence it can judge. The numbers do
+        # not: the model is never asked to repeat one.
+        "clauses": {k: v["clause"] for k, v in entry["thresholds"].items()},
+    }
+
+
+THRESHOLD_NAMES = ("max_cps", "min_duration_s", "max_line_chars", "max_lines")
+
+# A published value, with the page it is published on, used ONLY to fill a gap
+# the live fetch left, and always labelled `fallback` in the result so the UI
+# can say so. This exists because a buyer's spec is spread across several pages
+# and Parallel does not return the same one every run: one run landed on the
+# Netflix "Subtitle Templates" article, which states reading speed and line
+# length but not minimum duration, and the duration check then had no threshold.
+#
+# Silently having no threshold is the dangerous outcome, because a check with no
+# threshold reports zero violations, and zero reads as "clean" in exactly the
+# field where it means "never looked". So: fill it, label it, and cite it.
+# Nothing here is invented, and nothing here is used when the live fetch worked.
+_NETFLIX_MIN_DURATION_FALLBACK = {
+    # Wording and value taken from the page itself, read back through Parallel
+    # Extract on 2026-09-09, not from memory. The page states the frame count and
+    # the fraction together, and 4/5 sec is 20 frames at 25fps, which is the rate
+    # that phrasing implies.
+    #
+    # Only the minimum duration is pinned, and deliberately only that. Reading
+    # speed is never pinned for either Netflix profile: the whole point of the
+    # two profiles is that each publishes its own figure, so a pinned reading
+    # speed would let one profile borrow the other's number and turn the
+    # comparison into an artefact of this file.
+    "min_duration_s": {
+        "value": 0.8,
+        "clause": (
+            "Subtitles should not be any shorter in duration than 20 frames "
+            "(or 4/5 sec)."
+        ),
+        "url": (
+            "https://partnerhelp.netflixstudios.com/hc/en-us/articles/"
+            "215758617-Timed-Text-Style-Guide-General-Requirements"
+        ),
+    }
+}
+
+PINNED_FALLBACKS: dict[str, dict[str, dict]] = {
+    "netflix_en_us": _NETFLIX_MIN_DURATION_FALLBACK,
+    "netflix_templates": _NETFLIX_MIN_DURATION_FALLBACK,
+}
+
+
+def spec_from_ledger(platform: str, urls: list[str] | str) -> dict:
+    """Build the spec Cuepass measures against, from the pages a desk accepted.
+
+    A buyer's spec is not always on one page, so several accepted URLs are
+    merged and each threshold keeps the URL and the verbatim clause it was
+    actually read from. First page to state a rule wins it, which is why the
+    desk is told to open its best candidate first.
+
+    Every one of the four thresholds ends up with a provenance:
+        live         read this run from a page Extract opened
+        fallback     the buyer's published value, pinned and cited, because the
+                     live fetch did not land on a page stating it
+        unverified   no live value and nothing pinned. The check is NOT run and
+                     is listed in `not_verifiable`. It is never reported as
+                     zero violations, because zero would mean "clean" when the
+                     truth is "never measured".
+    """
+    if isinstance(urls, str):
+        urls = [urls]
+    urls = [u for u in urls if u]
+    if not urls:
+        raise ParallelUnavailableError("the desk accepted no page")
+
+    entries = []
+    for url in urls:
+        entry = ledger_get(url)
+        if entry is None:
+            continue
+        entries.append(entry)
+    if not entries:
+        raise ParallelUnavailableError(
+            f"None of {urls} was opened by Parallel Extract this run, so there is "
+            "no page text behind any of them. Cuepass will not measure against a "
+            "URL it did not read."
+        )
+
+    merged: dict[str, dict] = {}
+    for entry in entries:
+        for name, value in entry["thresholds"].items():
+            # Default the citation to the page this threshold was read from, not
+            # to the profile's lead page. Getting that backwards points a reader
+            # at a page that does not contain the number they are checking.
+            merged.setdefault(
+                name,
+                {**value, "url": value.get("url") or entry["url"], "provenance": "live"},
+            )
+    if not merged:
+        raise ParallelUnavailableError(
+            f"{', '.join(u for u in urls)} were extracted but state none of the "
+            "four rules Cuepass can measure."
+        )
+
+    pinned = PINNED_FALLBACKS.get(platform, {})
+    not_verifiable: list[str] = []
+    for name in THRESHOLD_NAMES:
+        if name in merged:
+            continue
+        if name in pinned:
+            merged[name] = {**pinned[name], "provenance": "fallback"}
+        else:
+            not_verifiable.append(name)
+
+    lead = entries[0]
+    spec = {
+        "platform": PLATFORM_LABELS.get(platform, platform),
+        "platform_key": platform,
+        "scope": PROFILE_SCOPE.get(platform, ""),
+        "source_url": lead["url"],
+        "source_label": lead["title"],
+        "source_urls": [e["url"] for e in entries],
+        "publish_date": lead["publish_date"],
+        "extract_id": lead["extract_id"],
+        "session_id": lead["session_id"],
+        "chars_extracted": sum(e["chars_extracted"] for e in entries),
+        "is_cached": False,
+        "evidence": {
+            name: {
+                "value": v["value"],
+                "clause": v["clause"],
+                "url": v.get("url", lead["url"]),
+                "provenance": v["provenance"],
+                # Whether this number came off the profile's headline page or off
+                # another page the desk had to open to find it. A spec is spread
+                # across pages, so this is common and not a fault, but a reader
+                # following the headline citation to check a number that is not on
+                # that page would be right to lose trust. Stated here rather than
+                # left for each consumer to work out by comparing URLs.
+                "from_profile_page": v.get("url", lead["url"]) == lead["url"],
+            }
+            for name, v in merged.items()
+        },
+        "provenance": {
+            name: merged[name]["provenance"] if name in merged else "unverified"
+            for name in THRESHOLD_NAMES
+        },
+        # The checks that were not run at all. The UI must render these as
+        # "not verifiable against the live spec", never as a passing check.
+        "not_verifiable": not_verifiable,
+    }
+    for name in THRESHOLD_NAMES:
+        spec[name] = merged[name]["value"] if name in merged else None
+    if spec["max_lines"] is not None:
+        spec["max_lines"] = int(spec["max_lines"])
+    if spec["max_line_chars"] is not None:
+        spec["max_line_chars"] = int(spec["max_line_chars"])
+    return spec

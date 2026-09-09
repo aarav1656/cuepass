@@ -104,16 +104,56 @@ def test_repair_never_introduces_an_overlap_in_a_clean_track():
 
 
 @needs_key
-def test_parallel_returns_a_live_cited_spec():
-    """Proves the Parallel integration is actually reachable and returns citations."""
-    spec = parallel_spec.fetch_spec("netflix")
+def test_parallel_search_then_extract_reaches_a_real_spec_page():
+    """The whole Parallel chain, against the live API, end to end.
+
+    Search must return candidate URLs, and Extract must open one of them and
+    yield at least one threshold with the verbatim sentence it came from. This
+    is the test that proves the integration is reachable rather than described.
+    """
+    found = parallel_spec.search_spec_candidates("netflix_en_us")
+    assert found["candidates"], "Search returned no candidate spec page"
+    assert found["session_id"], "Search must return a session id to carry into Extract"
+    for candidate in found["candidates"]:
+        assert parallel_spec.is_citable_url(candidate["url"])
+
+    # Open candidates until one states a rule, which is what the desk does.
+    for candidate in found["candidates"][:3]:
+        read = parallel_spec.extract_spec_page(
+            "netflix_en_us", candidate["url"], found["session_id"]
+        )
+        if read.get("found"):
+            break
+    else:
+        pytest.fail("Extract opened three candidates and none stated a caption rule")
+
+    assert read["chars_extracted"] > 0, "Extract returned a page with no text"
+    assert read["extract_id"], "Extract must return an id the run can be traced by"
+    for name, clause in read["clauses"].items():
+        assert clause.strip(), f"{name} was read with no clause behind it"
+
+    spec = parallel_spec.spec_from_ledger("netflix_en_us", [read["url"]])
     assert spec["source_url"].startswith("http")
-    assert spec["max_cps"] > 0
-    assert not spec.get("is_cached", False), "expected a live fetch, got a cached value"
+    assert not spec["is_cached"], "expected a live fetch, got a cached value"
+    # At least one threshold, and every threshold present is either read live
+    # off the page or a labelled fallback. Never an unlabelled constant.
+    assert any(spec[n] is not None for n in parallel_spec.THRESHOLD_NAMES)
+    for name in parallel_spec.THRESHOLD_NAMES:
+        provenance = spec["provenance"][name]
+        assert provenance in ("live", "fallback", "unverified")
+        if provenance == "unverified":
+            assert spec[name] is None
+        else:
+            assert spec[name] is not None
+    parallel_spec.ledger_clear()
 
 
 def test_parallel_raises_without_a_key(monkeypatch):
     """No key must be a hard stop, never a silent fallback to hardcoded constants."""
     monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
     with pytest.raises(parallel_spec.ParallelUnavailableError):
-        parallel_spec.fetch_spec("netflix")
+        parallel_spec.search_spec_candidates("netflix_en_us")
+    with pytest.raises(parallel_spec.ParallelUnavailableError):
+        parallel_spec.extract_spec_page(
+            "netflix_en_us", "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617"
+        )
