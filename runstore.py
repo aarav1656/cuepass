@@ -382,6 +382,12 @@ def get_run(run_id: str) -> dict | None:
                 }
             ),
             "source_urls": spec.get("source_urls", []),
+            # How each cited page was found this run: "parallel_search" with the
+            # rank and the queries that surfaced it, or "seed_fallback" on the
+            # one documented condition. Stored, not derived, so a run archived
+            # today can still say where its URL came from.
+            "discovery": spec.get("discovery", ""),
+            "source_discovery": spec.get("source_discovery", []),
         },
         "totals": {
             "cues": record.get("cue_count", 0),

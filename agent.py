@@ -272,9 +272,13 @@ def run_agent(identifier: str | None = None) -> dict:
     if not srt_text.strip():
         raise RuntimeError(f"Empty subtitle file for {info['identifier']}")
 
-    # The ledger is per-run: a URL accepted by a desk must have been opened by
-    # this run's Extract call, not by a previous one still sitting in memory.
+    # Both registers are per-run. The ledger: a URL accepted by a desk must have
+    # been opened by this run's Extract call, not by a previous one still
+    # sitting in memory. The offer register: a URL may only be opened if this
+    # run's Search offered it, so a page found by a previous run cannot be
+    # reopened without being found again.
     parallel_spec.ledger_clear()
+    parallel_spec.discovery_clear()
 
     workflow = cuepass_agents.build_workflow()
     state, trace = asyncio.run(

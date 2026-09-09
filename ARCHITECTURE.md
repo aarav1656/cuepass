@@ -17,6 +17,10 @@ POST /run
 
 Search is not allowed to produce a number. Extract opens the page. Every threshold on the live path is read from that text. If Parallel cannot produce a cited spec, the run raises. There is no hardcoded `MAX_CPS`: reading speed is never pinned, for either Netflix profile.
 
+Search is also where the URL comes from. `extract_spec_page` refuses any URL that was not returned by a `search_spec_candidates` call in the same run, so neither a constant in `parallel_spec.py` nor a URL the model remembered from training can be opened, let alone measured against. Each cited page carries `discovery: "parallel_search"` with the search id, its rank in the result, and the queries that surfaced it, through Extract into the spec, the stored run and the page.
+
+One URL is written in the repository, `SEARCH_FAILURE_FALLBACK_URLS`, and it fires on exactly one condition: Parallel Search returned zero candidates on any host in `OFFICIAL_HOSTS` for that profile. If Search returns even one official-host URL the fallback is not offered to the desk and cannot be extracted. When it does fire, the candidate, the ledger row, the spec and the interface all read `seed_fallback` rather than `parallel_search`. It holds no threshold value: the page is still opened by Extract and every number still comes off the extracted text.
+
 Two rules have a pinned fallback, `min_duration_s` and `min_gap_s`, because both sit on Netflix timing pages that neither profile's headline article states or links, and the desk does not always land there. They are `PINNED_FALLBACKS` in `parallel_spec.py`, each carries the Netflix page it is published on and that page's exact sentence, and each comes back with provenance `fallback`, which the interface prints beside the number.
 
 `min_gap_s` is the gap the repair has to leave in front of every cue it lengthens: "Subtitles must have a minimum of 2 frames between them." The repair used to close gaps to a hardcoded one frame, so the repaired file failed the page it had been repaired against. `remeasure_every_buyer` now reads the repaired file back and raises if the repair narrowed any gap below the cited minimum.

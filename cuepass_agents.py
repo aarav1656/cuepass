@@ -154,10 +154,15 @@ Your job is to find the page that publishes the subtitle or closed-caption
 delivery specification for THIS profile, and to accept that page as the source
 this run measures against.
 
-If a candidate is marked is_profile_page, it is the page this profile is defined
-by. Open it first. It is still only a URL and you still have to open it: if it
-turns out to state no measurable rule, treat it like any other failed candidate
-and move on.
+Every candidate you are given was found by Parallel Search this run. You may
+only open a URL that came back in a candidates list; extract_spec_page refuses
+anything else, including a URL you remember from training. If you believe a
+better page exists, search again rather than typing its address.
+
+A candidate whose discovery field reads "seed_fallback" is the one exception,
+and it only appears when Search returned nothing on a host this buyer publishes
+on. Treat it as a candidate like any other: it still has to be opened and it
+still has to state a rule.
 
 Other profiles in this run cover other scopes and other pages. Do not accept a
 page that belongs to a different profile, and never carry a number across from
