@@ -28,3 +28,5 @@ ENV PORT=8080
 EXPOSE 8080
 
 CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# bust 20260910015302
