@@ -1,6 +1,6 @@
 # Cuepass: partner wiring
 
-One product, one Devpost track: **Parallel**. Google ADK + Gemini run the desks. The partner the form selects is Parallel Search and Extract, via the official `parallel-web` SDK, at runtime, every run.
+Google ADK and Gemini run the desks. Every threshold they measure against comes from Parallel Search and Extract, via the official `parallel-web` SDK, at runtime, on every run.
 
 ## Runtime path
 
@@ -31,6 +31,18 @@ One rule has a pinned fallback, `min_duration_s`, because neither Netflix profil
 
 ## Google
 
-Each desk is an ADK `LlmAgent`. The model picks which candidate URL is the buyer's page. It never invents a threshold.
+Each desk is an ADK `LlmAgent` on `gemini-2.5-flash`. The model picks which candidate URL is the buyer's page. It never invents a threshold.
+
+The graph is a `google.adk.workflow.Workflow` named `cuepass_delivery_desk`: 13 nodes, 16 edges, of which 6 are `LlmAgent`, 5 are `FunctionNode` that call no model, and one is the `JoinNode` that waits for every desk.
+
+```bash
+python -c "
+import collections, cuepass_agents
+g = cuepass_agents.graph_shape()
+print(g['workflow'], len(g['nodes']), 'nodes', len(g['edges']), 'edges')
+print(collections.Counter(n['kind'] for n in g['nodes']))"
+#   cuepass_delivery_desk 13 nodes 16 edges
+#   Counter({'LlmAgent': 6, 'FunctionNode': 5, 'BaseNode': 1, 'JoinNode': 1})
+```
 
 Live: the sheet header is the cited URL from that run, and `149 -> 75` is a second measure of the repaired file.
