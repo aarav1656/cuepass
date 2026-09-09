@@ -20,7 +20,7 @@ import agent as agent_mod
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="SIXTEEN SEVENTEEN", docs_url="/api/docs")
+app = FastAPI(title="Cuepass", docs_url="/api/docs")
 
 # Known films with real .srt tracks that produce interesting measurements
 KNOWN_FILMS = [
@@ -51,7 +51,7 @@ HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SIXTEEN SEVENTEEN</title>
+  <title>Cuepass</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -415,7 +415,7 @@ HTML = """<!DOCTYPE html>
 <div class="layout">
 
   <header>
-    <span class="wordmark">SIXTEEN SEVENTEEN</span>
+    <span class="wordmark">Cuepass</span>
     <span class="wordmark-tag">subtitle QC</span>
   </header>
 
