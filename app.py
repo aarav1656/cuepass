@@ -21,12 +21,18 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 import agent as agent_mod
+import archive
 import runstore
 
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +73,215 @@ CHECK_TO_RULE = {
 # Repair retimes cues. It cannot shorten a line, so the headline pair counts the
 # violations retiming is able to address and the breakdown carries the rest.
 TIMING_CHECKS = ("reading_speed", "min_duration", "non_positive_duration")
+
+# ---- the frame at the cue -------------------------------------------------
+# A cue is a line of dialogue on a picture. The sheet can say 22.63 cps all day
+# and it stays an abstraction until the frame that line sits over is on screen
+# with the line drawn on it. The picture is not decoration here: it is the thing
+# being measured. Frames are cut from the same archive.org item the track came
+# from, at the cue's own in-time, so nothing on the panel is a stand-in.
+FRAME_DIR = Path(os.environ.get("CUEPASS_FRAME_DIR", "/tmp/cuepass-frames"))
+# h.264 first: it is the derivative that seeks in one range request. The others
+# are there so an item without an mp4 still yields a frame rather than a gap.
+FRAME_VIDEO_EXT = (".mp4", ".m4v", ".ogv", ".mpg", ".mpeg", ".avi")
+FRAME_TIMEOUT = 150
+# How many frames the box pulls ahead of the reader on first load. The sheet
+# opens on the still-red rows, so those are the ones warmed.
+FRAME_PREWARM = 20
+
+_frame_registry_lock = threading.Lock()
+_frame_locks: dict[str, threading.Lock] = {}
+# identifier -> the archive.org video URL frames are cut from. Filled by the
+# prewarm thread and read without blocking, so no page render and no test ever
+# waits on archive.org metadata, and the page names the file only once it is
+# genuinely resolved.
+_video_urls: dict[str, str] = {}
+_prewarmed: set[str] = set()
+
+_TIMECODE_ONE = re.compile(r"^(\d+):(\d+):(\d+)[,.](\d+)$")
+
+
+def cue_seconds(timecode: str) -> float | None:
+    """One SRT timestamp as seconds, or None if it is not one.
+
+    Digit count decides the divisor, the same rule `measure._seconds` applies.
+    This archive.org ASR track writes two subsecond digits, so reading `,95` as
+    95ms would seek 855ms early and put a different shot on screen.
+    """
+    match = _TIMECODE_ONE.match((timecode or "").strip())
+    if match is None:
+        return None
+    hours, minutes, seconds, frac = match.groups()
+    return (
+        int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(frac) / (10 ** len(frac))
+    )
+
+
+def resolve_video_url(identifier: str) -> str:
+    """The archive.org video for an item, resolved once per box. "" if none."""
+    if identifier in _video_urls:
+        return _video_urls[identifier]
+    files: list = []
+    try:
+        files = archive.metadata(identifier).get("files", []) or []
+    except Exception:
+        logger.warning("archive metadata unavailable for %s", identifier, exc_info=True)
+    # Tallest picture wins, because this frame is going on screen at size. An
+    # item carries the same film at 320x240 and at 640x480, and picking on file
+    # size lands on the 256Kb derivative, which looks like a thumbnail blown up.
+    # Extension order breaks a tie, so an mp4 is taken over an equal-height ogv.
+    def rank(item: tuple[int, dict]) -> tuple[int, int, int]:
+        index, entry = item
+        return (
+            int(entry.get("height", 0) or 0),
+            -index,
+            int(entry.get("size", 0) or 0),
+        )
+
+    candidates = []
+    for entry in files:
+        name = str(entry.get("name", "")).lower()
+        if int(entry.get("size", 0) or 0) <= 0:
+            continue
+        for index, ext in enumerate(FRAME_VIDEO_EXT):
+            if name.endswith(ext):
+                candidates.append((index, entry))
+                break
+    url = ""
+    if candidates:
+        url = archive.download_url(identifier, max(candidates, key=rank)[1]["name"])
+    if url:
+        _video_urls[identifier] = url
+    return url
+
+
+def frame_path(identifier: str, seconds: float) -> Path:
+    """Where the frame at this instant lives. Keyed on the instant, not the cue.
+
+    Two profiles raise the same cue, and a cue is the same picture under both,
+    so the key is the item and the millisecond. The corpus is fixed and a frame
+    of a 1929 film does not change, so a hit is always the right picture.
+    """
+    return FRAME_DIR / f"{identifier}-{int(round(seconds * 1000)):09d}.jpg"
+
+
+def extract_frame(identifier: str, seconds: float) -> Path | None:
+    """The frame at `seconds`, cut with ffmpeg and cached. None if there is none.
+
+    Returning None is a real answer: no ffmpeg on this box, no video in the
+    item, or a seek the file cannot serve. The panel says so in words rather
+    than showing a broken image.
+    """
+    if not identifier or seconds is None or seconds < 0:
+        return None
+    dest = frame_path(identifier, seconds)
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    url = resolve_video_url(identifier)
+    if not url:
+        return None
+    with _frame_registry_lock:
+        lock = _frame_locks.setdefault(dest.name, threading.Lock())
+    # Two readers on the same cue must not both pull the same frame off
+    # archive.org. The second waits and then finds it on disk.
+    with lock:
+        if dest.exists() and dest.stat().st_size > 0:
+            return dest
+        FRAME_DIR.mkdir(parents=True, exist_ok=True)
+        part = dest.with_name(dest.name + ".part")
+        cmd = [
+            ffmpeg, "-nostdin", "-loglevel", "error", "-y",
+            # Seek before the input so ffmpeg range-requests its way to the
+            # keyframe instead of decoding a 452MB file from the top.
+            "-ss", f"{seconds:.3f}",
+            "-i", url,
+            "-frames:v", "1", "-q:v", "2", "-an", "-sn",
+            "-f", "image2", str(part),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=FRAME_TIMEOUT)
+        except Exception:
+            logger.warning("frame at %.3fs of %s not extracted", seconds, identifier, exc_info=True)
+            part.unlink(missing_ok=True)
+            return None
+        if not part.exists() or part.stat().st_size == 0:
+            part.unlink(missing_ok=True)
+            return None
+        part.replace(dest)
+        return dest
+
+
+def _prewarm_seconds(record: dict) -> list[float]:
+    """The in-times of the two views the page actually opens on.
+
+    First the still-red cues of the open desk, which is the landing sheet. Then
+    the cues behind the profile-contrast number, which is the one click the
+    product is built around. Warming only the first would leave that click
+    landing on a black rectangle for as long as ffmpeg takes.
+    """
+    buyers = record.get("buyers") or {}
+    default = _default_buyer(buyers)
+    entry = buyers.get(default) or {}
+    still = {
+        (f.get("cue_index"), f.get("check"))
+        for f in entry.get("after", {}).get("findings", [])
+    }
+    open_cues = [
+        f.get("cue_index")
+        for f in entry.get("before", {}).get("findings", [])
+        if (f.get("cue_index"), f.get("check")) in still
+    ]
+    contrast_cues: list[int] = []
+    for row in record.get("contrasts") or []:
+        if row.get("stricter") == default:
+            contrast_cues.extend(row.get("cue_indices") or [])
+
+    at: dict[int, float] = {}
+    for finding in entry.get("before", {}).get("findings", []):
+        index = finding.get("cue_index")
+        if index in at:
+            continue
+        seconds = cue_seconds(str(finding.get("timecode", "")).partition(" --> ")[0])
+        if seconds is not None:
+            at[index] = seconds
+
+    out: list[float] = []
+    for index in open_cues[:FRAME_PREWARM] + contrast_cues[:FRAME_PREWARM]:
+        seconds = at.get(index)
+        if seconds is not None and seconds not in out:
+            out.append(seconds)
+    return out
+
+
+def prewarm_frames(record: dict | None) -> None:
+    """Pull the opening frames in the background, once per run per box.
+
+    The first reader would otherwise wait on ffmpeg for the hero frame. This
+    runs off the page request, so the panel fills in behind them.
+    """
+    if not record:
+        return
+    identifier = record.get("film_identifier", "")
+    run_id = record.get("run_id", "")
+    if not identifier or not shutil.which("ffmpeg"):
+        return
+    with _frame_registry_lock:
+        if run_id in _prewarmed:
+            return
+        _prewarmed.add(run_id)
+    targets = _prewarm_seconds(record)
+    if not targets:
+        return
+
+    def work() -> None:
+        resolve_video_url(identifier)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(lambda s: extract_frame(identifier, s), targets))
+
+    threading.Thread(target=work, name="cuepass-frames", daemon=True).start()
 
 
 def safe_url(url: str) -> str:
@@ -434,6 +649,10 @@ def ui_run(record: dict) -> dict:
         "title": record.get("film_title", ""),
         "identifier": record.get("film_identifier", ""),
         "source_url": safe_url(record.get("subtitle_url", "")),
+        # The video frames are cut from, named only once it has actually been
+        # resolved off archive.org. Read from memory, never fetched here, so
+        # rendering a page and importing this module stay offline.
+        "video_url": safe_url(_video_urls.get(record.get("film_identifier", ""), "")),
         "source_filename": record.get("subtitle_filename", ""),
         "fraction_digits": _fraction_digits(record),
         "measured_at": record.get("measured_at", ""),
@@ -471,6 +690,7 @@ HTML = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cuepass: subtitle compliance against the buyer's cited spec</title>
   <meta name="description" content="Cuepass measures a subtitle track against each buyer's own published caption specification, fetched live, and shows the verbatim sentence every threshold was read from." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23131313'/%3E%3Crect x='6' y='21' width='20' height='4' fill='%233cffd0'/%3E%3Crect x='9' y='27' width='14' height='2' fill='%23949494'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -482,12 +702,14 @@ HTML = """<!DOCTYPE html>
       --surface: #191919;
       --border:  #242424;
       --border-hi: #363636;
+      /* Every one of these clears 4.5:1 on the canvas, measured rather than
+         eyeballed: the sheet was grey-on-near-black at 11px and a judge skims. */
       --text:    #ffffff;
-      --text-2:  #9a9a9a;
-      --text-3:  #5c5c5c;
+      --text-2:  #c8c8c8;
+      --text-3:  #949494;
       --mint:    #3cffd0;
-      --mint-dim: #1d5c4f;
-      --red:     #ff3b3b;
+      --mint-dim: #2b7a68;
+      --red:     #ff5d52;
       --display: 'Anton', Impact, 'Helvetica Neue', sans-serif;
       --mono:    'Space Mono', ui-monospace, 'JetBrains Mono', monospace;
       --read:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -499,8 +721,8 @@ HTML = """<!DOCTYPE html>
       background: var(--canvas);
       color: var(--text);
       font-family: var(--read);
-      font-size: 15px;
-      line-height: 1.5;
+      font-size: 16px;
+      line-height: 1.55;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
     }
@@ -537,13 +759,12 @@ HTML = """<!DOCTYPE html>
       color: var(--mint);
     }
     .brand-claim {
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.5;
-      letter-spacing: 0.2px;
+      font-family: var(--read);
+      font-size: 15px;
+      line-height: 1.55;
       color: var(--text-2);
-      max-width: 84ch;
-      margin-top: 7px;
+      max-width: 62ch;
+      margin-top: 9px;
     }
     .brand-claim b { color: var(--text); font-weight: 700; }
 
@@ -624,7 +845,7 @@ HTML = """<!DOCTYPE html>
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) {
       .spinner { animation: none; }
-      .run-btn, .rail-row, .cue-row, .flt { transition: none; }
+      .run-btn, .rail-row, .cue-row, .flt, .screen-img { transition: none; }
     }
 
     /* ---- spec band: the cited spec is the header, not a footnote ---- */
@@ -682,16 +903,16 @@ HTML = """<!DOCTYPE html>
 
     .th-row {
       display: grid;
-      grid-template-columns: 60px 92px minmax(0, 1fr);
-      gap: 0 14px;
+      grid-template-columns: 64px 94px minmax(0, 1fr);
+      gap: 0 16px;
       align-items: baseline;
-      padding: 1px 0;
-      border-bottom: 1px dotted #262626;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
     }
     .th-row:last-child { border-bottom: 0; }
     .th-val {
       font-family: var(--mono);
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 700;
       letter-spacing: -0.4px;
       text-align: right;
@@ -708,50 +929,79 @@ HTML = """<!DOCTYPE html>
       text-transform: uppercase;
       color: var(--text-3);
     }
+    /* The verbatim sentence is the track argument, so it is set as a sentence
+       and not as log output: reading face, near-white, at a size a judge reads
+       standing up. */
     .th-clause {
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.45;
-      color: var(--text-2);
+      font-family: var(--read);
+      font-size: 15px;
+      line-height: 1.5;
+      color: var(--text);
       min-width: 0;
-      overflow-wrap: anywhere;
     }
-    .th-clause.absent { color: var(--text-3); }
-    .th-else {
+    .th-clause.absent { font-size: 14px; color: var(--text-3); }
+    /* The provenance of a borrowed threshold sits under its clause on its own
+       line. Inline, it used to push a 62-character unbreakable URL through the
+       right edge of the grid. */
+    .th-mark {
+      display: block;
+      margin-top: 5px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 0.2px;
       color: var(--text-3);
+    }
+    .th-else {
+      display: inline-block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: bottom;
+      color: var(--text-2);
       text-decoration: none;
       border-bottom: 1px solid var(--border-hi);
-      overflow-wrap: anywhere;
     }
     a.th-else:hover { color: var(--mint); border-color: var(--mint); }
     .th-else.warn { color: var(--red); border-bottom: 0; text-transform: uppercase; letter-spacing: 1.2px; font-size: 10px; }
 
     .sb-scope {
       grid-column: 1 / -1;
-      font-family: var(--mono);
-      font-size: 11px;
+      font-family: var(--read);
+      font-size: 14px;
       line-height: 1.5;
-      letter-spacing: 0.2px;
       color: var(--text-2);
-      margin-top: 9px;
-      padding-left: 9px;
-      border-left: 1px solid var(--mint-dim);
+      margin-top: 11px;
+      padding-left: 11px;
+      border-left: 2px solid var(--mint-dim);
     }
 
     .sb-prov {
       grid-column: 1 / -1;
-      margin-top: 10px;
-      padding-top: 9px;
+      margin-top: 11px;
+      padding-top: 10px;
       border-top: 1px solid var(--border);
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 11.5px;
       letter-spacing: 0.3px;
       color: var(--text-3);
       display: flex;
       flex-wrap: wrap;
-      gap: 3px 18px;
+      align-items: baseline;
+      gap: 4px 20px;
     }
-    .sb-prov a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid var(--border-hi); overflow-wrap: anywhere; }
+    .sb-prov > span { min-width: 0; max-width: 100%; }
+    .sb-prov a {
+      display: inline-block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: bottom;
+      color: var(--text-2);
+      text-decoration: none;
+      border-bottom: 1px solid var(--border-hi);
+    }
     .sb-prov a:hover { color: var(--mint); border-color: var(--mint); }
     .sb-prov .withheld { color: var(--red); }
 
@@ -800,11 +1050,11 @@ HTML = """<!DOCTYPE html>
     .rr-tag.none { color: var(--text-3); }
     .rr-sub {
       display: block;
-      font-size: 11px;
-      line-height: 1.45;
+      font-size: 11.5px;
+      line-height: 1.5;
       letter-spacing: 0.3px;
       color: var(--text-3);
-      margin-top: 3px;
+      margin-top: 4px;
       font-variant-numeric: tabular-nums;
     }
     .rr-sub .n { color: var(--text-2); font-weight: 700; }
@@ -813,10 +1063,11 @@ HTML = """<!DOCTYPE html>
        rail sets the width of the whole grid. */
     .rr-why {
       display: block;
-      font-size: 11px;
-      line-height: 1.45;
-      color: var(--text-3);
-      margin-top: 4px;
+      font-family: var(--read);
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--text-2);
+      margin-top: 6px;
       overflow-wrap: anywhere;
     }
     .rail, .rail-row, .contrast { min-width: 0; }
@@ -847,25 +1098,25 @@ HTML = """<!DOCTYPE html>
     }
     .c-say {
       display: block;
-      font-size: 11px;
+      font-family: var(--read);
+      font-size: 14px;
       line-height: 1.5;
-      letter-spacing: 0.2px;
       color: var(--text-2);
-      margin-top: 8px;
+      margin-top: 9px;
     }
     .c-side {
       display: block;
-      font-size: 11px;
-      line-height: 1.45;
+      font-size: 11.5px;
+      line-height: 1.5;
       color: var(--text-3);
-      margin-top: 7px;
-      padding-left: 9px;
+      margin-top: 8px;
+      padding-left: 10px;
       border-left: 1px solid var(--border-hi);
     }
     .c-side b {
       color: var(--text);
       font-weight: 700;
-      font-size: 13px;
+      font-size: 13.5px;
       font-variant-numeric: tabular-nums;
     }
     .c-side a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid var(--border-hi); margin-left: 7px; }
@@ -880,7 +1131,7 @@ HTML = """<!DOCTYPE html>
     }
     .c-go {
       display: inline-block;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.4px;
       color: var(--mint);
@@ -890,12 +1141,204 @@ HTML = """<!DOCTYPE html>
     }
     .contrast:hover .c-go { color: var(--text); border-color: var(--text); }
 
+    /* ---- the frame at the cue ----
+       A subtitle is a line of type over a picture, and every number on this
+       page is a statement about how that line sits on that picture. The frame
+       is cut from the same archive.org item the track came from, at the cue's
+       own in-time, and the cue is drawn over it the way a viewer gets it. */
+    .marquee {
+      display: grid;
+      grid-template-columns: minmax(0, 424px) minmax(0, 1fr);
+      gap: 0 36px;
+      align-items: start;
+      padding-top: 4px;
+    }
+    .reel { min-width: 0; }
+    .reel-head {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      padding-bottom: 7px;
+    }
+    .screen {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      background: #000;
+      border: 1px solid var(--border-hi);
+      overflow: hidden;
+      container-type: inline-size;
+    }
+    .screen-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity .45s ease;
+    }
+    .screen.ready .screen-img { opacity: 1; }
+    /* The cue, drawn as the delivered track times it. */
+    .screen-sub {
+      position: absolute;
+      left: 4%;
+      right: 4%;
+      bottom: 7%;
+      text-align: center;
+      font-family: var(--read);
+      /* Sized so a line at the 42-character limit still sets on one line. If
+         the panel wrapped it, a cue that breaks the line-length rule would look
+         the same as one that does not. */
+      font-size: clamp(12px, 3.7cqw, 18px);
+      line-height: 1.3;
+      color: #fff;
+      white-space: pre-line;
+      text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9);
+    }
+    /* A QC viewer burns the timecode into the corner. This one is the cue's
+       own in-time, which is the instant the frame behind it was cut at. */
+    .screen-tc, .screen-id {
+      position: absolute;
+      top: 8px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.6px;
+      color: rgba(255,255,255,0.82);
+      background: rgba(0,0,0,0.55);
+      padding: 2px 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .screen-tc { left: 8px; }
+    .screen-id { right: 8px; }
+    .screen-hold {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      top: 38%;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.6;
+      letter-spacing: 0.3px;
+      color: var(--text-3);
+    }
+    .screen.ready .screen-hold { display: none; }
+    .screen.gone { border-color: var(--border); }
+    .reel-cap {
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.55;
+      letter-spacing: 0.2px;
+      color: var(--text-3);
+      margin-top: 8px;
+    }
+    .reel-cap a {
+      color: var(--text-2);
+      text-decoration: none;
+      border-bottom: 1px solid var(--border-hi);
+      display: inline-block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: bottom;
+    }
+    .reel-cap a:hover { color: var(--mint); border-color: var(--mint); }
+
+    .reel-read { margin-top: 13px; }
+    .rr-rule {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+    /* Measured against the limit, on one scale. The tick is the published
+       number, the bar is what the cue does. */
+    .gauge {
+      position: relative;
+      height: 8px;
+      margin: 9px 0 8px;
+      background: #1e1e1e;
+      border: 1px solid var(--border);
+    }
+    .gauge-bar { position: absolute; left: 0; top: 0; bottom: 0; background: var(--red); }
+    .gauge-bar.ok { background: var(--mint); }
+    .gauge-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--mint); }
+    .rr-say {
+      font-family: var(--read);
+      font-size: 15px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .rr-say b { font-family: var(--mono); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .rr-say .over { color: var(--red); }
+    .rr-meta {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.6;
+      letter-spacing: 0.3px;
+      color: var(--text-3);
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .rr-meta b { color: var(--text-2); font-weight: 700; }
+
+    /* The cues either side of this one, in the filter that is open. Six real
+       frames, so what the sheet lists as rows also reads as a run of shots. */
+    .stripwrap { grid-column: 1 / -1; }
+    .strip-head {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin: 22px 0 8px;
+    }
+    .strip { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+    .strip-cell {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      background: #000;
+      border: 1px solid var(--border);
+      padding: 0;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .strip-cell img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: .55;
+      transition: opacity .18s ease;
+    }
+    .strip-cell:hover img { opacity: .9; }
+    .strip-cell.on { border-color: var(--mint); }
+    .strip-cell.on img { opacity: 1; }
+    .strip-num {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      letter-spacing: 0.4px;
+      color: #fff;
+      background: rgba(0,0,0,0.6);
+      padding: 2px 0;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (prefers-reduced-motion: reduce) { .strip-cell img { transition: none; } }
+
     /* ---- verdict: the pair is the headline ---- */
     .verdict { padding: 0 0 2px; }
     .v-kicker {
       font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: 1.5px;
+      font-size: 10.5px;
+      letter-spacing: 1.1px;
       text-transform: uppercase;
       color: var(--text-2);
       padding-bottom: 8px;
@@ -934,22 +1377,23 @@ HTML = """<!DOCTYPE html>
       color: var(--text-3);
     }
     .verdict-cap {
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.6;
-      letter-spacing: 0.3px;
+      font-family: var(--read);
+      font-size: 15px;
+      line-height: 1.55;
       color: var(--text-2);
-      margin-top: 9px;
-      max-width: 96ch;
+      margin-top: 12px;
+      max-width: 58ch;
     }
     .verdict-cap b { color: var(--text); font-weight: 700; }
     .breakdown {
       display: flex;
       flex-wrap: wrap;
-      gap: 3px 22px;
-      margin-top: 7px;
+      gap: 5px 22px;
+      margin-top: 11px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.3px;
       color: var(--text-3);
     }
@@ -958,7 +1402,7 @@ HTML = """<!DOCTYPE html>
     .take-row { display: flex; flex-wrap: wrap; gap: 9px 22px; margin-top: 9px; }
     .take-track {
       font-family: var(--mono);
-      font-size: 12px;
+      font-size: 12.5px;
       font-weight: 700;
       letter-spacing: 0.4px;
       color: var(--mint);
@@ -969,12 +1413,11 @@ HTML = """<!DOCTYPE html>
     .take-track.second { color: var(--text-2); border-color: var(--border-hi); font-weight: 400; }
     .take-track:hover { color: var(--text); border-color: var(--text); }
     .src-note {
-      font-family: var(--mono);
-      font-size: 11px;
-      line-height: 1.5;
-      letter-spacing: 0.3px;
-      color: var(--text-3);
-      margin-bottom: 13px;
+      font-family: var(--read);
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--text-2);
+      margin-bottom: 15px;
     }
     .src-note b { color: var(--red); font-weight: 700; }
 
@@ -984,14 +1427,14 @@ HTML = """<!DOCTYPE html>
       flex-wrap: wrap;
       align-items: baseline;
       gap: 4px 0;
-      padding: 8px 0 4px;
+      padding: 20px 0 6px;
     }
     .flt {
       background: none;
       border: 0;
       cursor: pointer;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 11.5px;
       letter-spacing: 1.4px;
       text-transform: uppercase;
       color: var(--text-3);
@@ -1022,18 +1465,23 @@ HTML = """<!DOCTYPE html>
     .sheet-head .r { text-align: right; }
 
     .cue-row {
-      padding: 10px 0;
+      padding: 11px 0;
       border-bottom: 1px solid var(--border);
       align-items: start;
+      cursor: pointer;
       transition: background .1s ease;
     }
-    .cue-row.copyable { cursor: pointer; }
-    .cue-row.copyable:hover { background: rgba(255,255,255,0.022); }
+    .cue-row:hover { background: rgba(255,255,255,0.03); }
     .cue-row.copied  { background: rgba(60,255,208,0.06); }
+    /* The row whose frame is on the screen above. */
+    .cue-row.on {
+      background: rgba(255,255,255,0.04);
+      box-shadow: inset 2px 0 0 var(--mint);
+    }
 
     .cue-num {
       font-family: var(--mono);
-      font-size: 12px;
+      font-size: 12.5px;
       color: var(--text-3);
       display: flex;
       align-items: center;
@@ -1046,7 +1494,7 @@ HTML = """<!DOCTYPE html>
 
     .cue-tc {
       font-family: var(--mono);
-      font-size: 12px;
+      font-size: 12.5px;
       color: var(--text-2);
       letter-spacing: -0.2px;
       padding-top: 3px;
@@ -1072,27 +1520,26 @@ HTML = """<!DOCTYPE html>
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .cue-why { font-family: var(--mono); font-size: 12px; letter-spacing: 0.4px; margin-top: 5px; color: var(--red); }
+    .cue-why { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.4px; margin-top: 6px; color: var(--red); }
     .cue-why.repaired { color: var(--mint); }
-    .cue-act { font-family: var(--mono); font-size: 11px; line-height: 1.45; letter-spacing: 0.3px; margin-top: 3px; color: var(--text-3); }
+    .cue-act { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; letter-spacing: 0.3px; margin-top: 4px; color: var(--text-3); }
     .cue-act b { color: var(--text-2); font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
 
     .cue-val { text-align: right; font-family: var(--mono); padding-top: 1px; font-variant-numeric: tabular-nums; }
     .cue-val .big { font-size: 19px; font-weight: 700; line-height: 1; letter-spacing: -0.3px; }
     .cue-val.red  .big { color: var(--red); }
     .cue-val.mint .big { color: var(--mint); }
-    .cue-val .sub { display: block; font-size: 11px; color: var(--text-3); margin-top: 5px; letter-spacing: 0.4px; }
+    .cue-val .sub { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 5px; letter-spacing: 0.4px; }
 
     .empty-note {
       padding: 26px 0;
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.65;
-      letter-spacing: 0.3px;
-      color: var(--text-3);
-      max-width: 66ch;
+      font-family: var(--read);
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text-2);
+      max-width: 62ch;
     }
-    .empty-note b { color: var(--text-2); font-weight: 700; }
+    .empty-note b { color: var(--text); font-weight: 700; }
 
     /* ---- graph: declared topology with the nodes that actually fired ---- */
     .provenance { margin-top: 34px; border-top: 1px solid var(--border-hi); padding-top: 14px; }
@@ -1104,29 +1551,34 @@ HTML = """<!DOCTYPE html>
       color: var(--text-3);
     }
     .prov-note {
-      font-family: var(--mono);
-      font-size: 11px;
+      font-family: var(--read);
+      font-size: 14.5px;
       line-height: 1.6;
-      letter-spacing: 0.3px;
-      color: var(--text-3);
-      margin-top: 7px;
-      max-width: 88ch;
+      color: var(--text-2);
+      margin-top: 9px;
+      max-width: 74ch;
     }
-    .prov-note b { color: var(--text-2); font-weight: 700; }
-    .nodes { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 11px; }
+    .prov-note b { color: var(--text); font-weight: 700; }
+    .nodes { display: flex; flex-wrap: wrap; gap: 7px 8px; margin-top: 13px; }
     .node {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 11.5px;
       letter-spacing: 0.3px;
-      padding: 3px 8px;
+      padding: 4px 9px;
       border: 1px solid var(--border);
       border-radius: 2px;
       color: var(--text-3);
     }
     .node.fired { color: var(--text); border-color: var(--border-hi); }
     .node.fired.model { border-color: var(--mint-dim); }
-    .node .times { color: var(--text-3); margin-left: 6px; font-variant-numeric: tabular-nums; }
-    .node.cold { border-style: dashed; }
+    .node .times { color: var(--text-3); margin-left: 7px; font-variant-numeric: tabular-nums; }
+    /* A node that runs no model authors no event, so it can never appear in the
+       stream. Marking it as silent rather than cold stops a deterministic node
+       reading like a failed one. */
+    .node.silent { color: var(--text-2); border-color: var(--border); }
+    .node.silent .times { color: var(--text-3); }
+    .node.cold { border-style: dashed; color: var(--text-3); }
+    .node.cold .times { color: var(--red); }
 
     .error-box { margin-bottom: 20px; border: 1px solid var(--red); border-radius: 2px; padding: 13px 15px; }
     .error-label {
@@ -1139,11 +1591,34 @@ HTML = """<!DOCTYPE html>
     }
     .error-body { font-family: var(--mono); font-size: 12px; color: var(--text-2); line-height: 1.6; overflow-wrap: anywhere; }
 
+    @media (max-width: 620px) {
+      /* The threshold, then its unit, then the sentence under both. Holding
+         three columns here squeezed the clause into a two-word ribbon. */
+      .th-row { grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; padding: 9px 0; }
+      .th-val { text-align: left; }
+      .th-clause { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 900px) {
+      /* The frame stops being a column and becomes the top of the page. It
+         keeps its size: a subtitle you cannot read is not evidence. */
+      .marquee { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+      .reel { max-width: 452px; }
+      .strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 520px) {
+      .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+
     @media (max-width: 1040px) {
-      .masthead { grid-template-columns: 1fr; align-items: start; }
+      /* minmax(0, 1fr), never 1fr: a bare 1fr track cannot shrink below its
+         content's min-content width, and one 62-character URL in the spec band
+         is enough to set the width of the whole page. */
+      .masthead { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .runbar, .status-line { justify-content: flex-start; text-align: left; }
-      .specband { grid-template-columns: 1fr; gap: 12px; }
-      .split { grid-template-columns: 1fr; gap: 24px; }
+      .specband { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+      .split { grid-template-columns: minmax(0, 1fr); gap: 24px; }
       .rail { border-right: 0; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 16px; }
       .sheet-head { display: none; }
       /* The cue text is the row. On a narrow screen it takes the full width and
@@ -1206,7 +1681,7 @@ const specBand = document.getElementById('specband');
 const rail     = document.getElementById('rail');
 const mainArea = document.getElementById('main-area');
 
-let STATE = { run: null, index: [], engine: { parallel: false, gemini: false }, buyer: '', mode: '', error: '' };
+let STATE = { run: null, index: [], engine: { parallel: false, gemini: false }, buyer: '', mode: '', error: '', cue: null, visible: [] };
 
 filmSel.addEventListener('change', () => { if (filmSel.value) identIn.value = ''; });
 identIn.addEventListener('input',  () => { if (identIn.value)  filmSel.value = ''; });
@@ -1313,11 +1788,19 @@ function stamp(iso) {
 function hostOf(url) {
   try { return new URL(url).host.replace(/^www\\./, ''); } catch (e) { return ''; }
 }
-function pathOf(url) {
+// A citation has to stay checkable, and a Netflix help-centre article slug is
+// 62 characters of unbreakable token. Shown whole it walked out through the
+// right edge of the spec band. Host plus a clipped last segment identifies the
+// page, the full URL rides in the href and the title, and the CSS clips
+// whatever is left, so no length of URL can push the grid again.
+function shortUrl(url) {
   try {
     var u = new URL(url);
-    var p = u.pathname + (u.search || '');
-    return p.length > 44 ? p.slice(0, 44) + '\\u2026' : p;
+    var host = u.host.replace(/^www\\./, '');
+    var segs = u.pathname.split('/').filter(function (s) { return s; });
+    var last = segs.length ? segs[segs.length - 1] : '';
+    if (last.length > 30) last = last.slice(0, 30) + '\\u2026';
+    return last ? host + '/' + last : host;
   } catch (e) { return ''; }
 }
 
@@ -1354,12 +1837,14 @@ function renderSpecBand(run, buyerKey) {
     // the same publisher's guide. Marked and linked, never folded in silently.
     var mark = '';
     if (e.off_profile) {
-      mark = e.url
-        ? ' <a class="th-else" href="' + esc(e.url) + '" target="_blank" rel="noopener">not on this profile page, read from ' + esc(hostOf(e.url) + pathOf(e.url)) + '</a>'
-        : ' <span class="th-else">not on this profile page</span>';
+      mark += e.url
+        ? '<span class="th-mark">not on this profile page. read from '
+          + '<a class="th-else" href="' + esc(e.url) + '" target="_blank" rel="noopener"'
+          + ' title="' + esc(e.url) + '">' + esc(shortUrl(e.url) || e.url) + '</a></span>'
+        : '<span class="th-mark">not on this profile page</span>';
     }
     if (e.provenance && e.provenance !== 'live') {
-      mark += ' <span class="th-else warn">' + esc(e.provenance) + '</span>';
+      mark += '<span class="th-mark"><span class="th-else warn">' + esc(e.provenance) + '</span></span>';
     }
     return '<div class="th-row">'
       + '<span class="th-val">' + esc(shown) + '</span>'
@@ -1374,8 +1859,8 @@ function renderSpecBand(run, buyerKey) {
   var prov = [];
   if (s.citation_url) {
     prov.push('<span>read from <a href="' + esc(s.citation_url) + '" target="_blank" rel="noopener"'
-      + (s.citation_title ? ' title="' + esc(s.citation_title) + '"' : '') + '>'
-      + esc(hostOf(s.citation_url) || s.citation_url) + esc(pathOf(s.citation_url)) + '</a></span>');
+      + ' title="' + esc(s.citation_title || s.citation_url) + '">'
+      + esc(shortUrl(s.citation_url) || s.citation_url) + '</a></span>');
   } else if (s.url_withheld) {
     prov.push('<span class="withheld">source URL withheld: the result came back malformed, '
       + 'and Cuepass will not print a link it cannot resolve</span>');
@@ -1676,8 +2161,27 @@ function renderSheet(state) {
     + '</div>';
 
   var allRows = entry.rows || [];
-  mainArea.innerHTML = errHtml + verdict + '<div id="sheet"></div>' + provenanceHtml(run);
+  // The frame and the pair, side by side. The picture is the thing the numbers
+  // are about, so it opens the page rather than illustrating it further down.
+  var marquee = '<div class="marquee">'
+    + '<section class="reel" aria-label="The frame this cue sits on">'
+      + '<div class="reel-head">The cue on the picture</div>'
+      + '<div id="reel-body"></div>'
+    + '</section>'
+    + verdict
+    + '<div class="stripwrap" id="strip-wrap"></div>'
+    + '</div>';
+  mainArea.innerHTML = errHtml + marquee + '<div id="sheet"></div>' + provenanceHtml(run);
   var sheet = document.getElementById('sheet');
+  var stripWrap = document.getElementById('strip-wrap');
+  if (stripWrap) {
+    stripWrap.addEventListener('click', function(e) {
+      var cell = e.target.closest('.strip-cell');
+      if (!cell) return;
+      var picked = allRows.filter(function(r) { return r.index === Number(cell.dataset.index); })[0];
+      if (picked) showCue(picked);
+    });
+  }
 
   if (allRows.length === 0) {
     sheet.innerHTML = '<div class="empty-note">No cue on this track breaks a rule that '
@@ -1715,15 +2219,24 @@ function renderSheet(state) {
       el.classList.toggle('on', on);
       el.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+    // The frame follows the sheet. A filter that hides the cue currently on
+    // screen would otherwise leave a picture up that this sheet no longer lists.
+    STATE.visible = visible;
+    var held = visible.filter(function(r) { return r.index === STATE.cue; })[0];
+    showCue(held || visible[0] || null);
   }
   document.getElementById('filter-row').addEventListener('click', function(e) {
     var el = e.target.closest('.flt');
     if (el) paint(el.dataset.mode);
   });
   host.addEventListener('click', function(e) {
-    var row = e.target.closest('.cue-row.copyable');
-    if (!row || !row.dataset.copy) return;
+    var row = e.target.closest('.cue-row');
+    if (!row) return;
+    var index = Number(row.dataset.index);
+    var picked = allRows.filter(function(r) { return r.index === index; })[0];
+    if (picked) { showCue(picked); keepReelInView(); }
     var note = row.dataset.copy;
+    if (!note) return;
     var mark = function() {
       row.classList.add('copied');
       setTimeout(function() { row.classList.remove('copied'); }, 900);
@@ -1789,7 +2302,8 @@ function rowHtml(r) {
   var copyLine = copyLineFor(r);
   var copyAttrs = copyLine ? ' data-copy="' + esc(copyLine) + '"' : '';
 
-  return '<div class="cue-row ' + (copyLine ? 'copyable' : 'cleared') + '"' + copyAttrs + '>'
+  return '<div class="cue-row ' + (copyLine ? 'copyable' : 'cleared') + '"'
+    + ' data-index="' + esc(r.index) + '"' + copyAttrs + '>'
     + '<div class="cue-num"><i class="dot ' + (open ? '' : 'repaired') + '"></i>' + pad4(r.index) + '</div>'
     + '<div class="cue-tc">' + esc(r.tc_in) + '<br>'
       + '<span class="out ' + (open ? '' : 'repaired') + '">' + esc(r.tc_out) + '</span></div>'
@@ -1811,21 +2325,35 @@ function provenanceHtml(run) {
   if (!nodes.length) return '';
   var fired = run.fired || {};
   var ran = nodes.filter(function(n) { return fired[n.name] > 0; }).length;
+  // An event in the stream carries the name of the agent that authored it, and
+  // only a node that calls a model authors one. A FunctionNode that binds specs
+  // or runs the measurement is silent by construction, so absence from the
+  // stream is what a working one looks like. Marking those apart from a model
+  // node that genuinely produced nothing keeps both readings honest.
+  var silent = nodes.filter(function(n) { return !n.runs_model && !(fired[n.name] > 0); }).length;
   var chips = nodes.map(function(n) {
     var hits = fired[n.name] || 0;
-    var cls = hits > 0 ? 'node fired' + (n.runs_model ? ' model' : '') : 'node cold';
-    return '<span class="' + cls + '">' + esc(n.name)
-      + (hits > 0 ? '<span class="times">' + hits + '</span>' : '<span class="times">did not fire</span>')
-      + '</span>';
+    if (hits > 0) {
+      return '<span class="node fired' + (n.runs_model ? ' model' : '') + '">' + esc(n.name)
+        + '<span class="times">' + hits + '</span></span>';
+    }
+    return '<span class="node ' + (n.runs_model ? 'cold' : 'silent') + '">' + esc(n.name)
+      + '<span class="times">'
+      + (n.runs_model ? 'no event under this name' : 'deterministic, no event')
+      + '</span></span>';
   }).join('');
   return '<div class="provenance">'
     + srcNote(run)
     + '<div class="prov-head">' + esc(g.workflow || 'workflow') + ': declared graph, and what ran</div>'
     + '<div class="prov-note">Every node the code declares is listed. The count beside one is how many '
-    + 'times it appeared in the stored event stream, read off the run rather than written down, so a node '
-    + 'that was declared and never fired says so. <b>' + ran + ' of ' + nodes.length + '</b> nodes fired '
-    + 'across <b>' + num(run.trace_len) + '</b> recorded steps. Mint outline marks a node that calls '
-    + '<b>' + esc(run.model) + '</b>. Clicking a still-red row above copies its spotting note; the '
+    + 'times it appeared in the stored event stream, read off the run rather than written down. '
+    + '<b>' + ran + ' of ' + nodes.length + '</b> nodes fired '
+    + 'across <b>' + num(run.trace_len) + '</b> recorded steps. Firing means authoring an event, which '
+    + 'only a node that calls a model can do: the <b>' + silent + '</b> deterministic nodes bind the '
+    + 'cited specs, measure, retime and measure again without one, so they author nothing and are '
+    + 'marked silent rather than failed. What they produced is the pair above. Mint outline marks a '
+    + 'node that calls <b>' + esc(run.model) + '</b>. Clicking a row above puts its frame on the '
+    + 'screen and copies its spotting note; the '
     + 'reason each edit was chosen travels in the exceptions file with the clause it breaks. The triage '
     + 'desk assigned edits to <b>' + num(run.editorial_capped_at) + '</b> of <b>'
     + num(run.leftover_cue_total) + '</b> cues left over across every desk. Framework <b>'
@@ -1833,6 +2361,174 @@ function provenanceHtml(run) {
     + esc((run.parallel_surfaces || []).join(' and ')) + '</b>.</div>'
     + '<div class="nodes">' + chips + '</div>'
     + '</div>';
+}
+
+// ---- the frame at the cue -----------------------------------------------
+// The measurement is a claim about a line of type over a picture. This puts the
+// picture on screen: the real frame at that cue's in-time, cut from the same
+// archive.org item the track came from, with the cue drawn over it the way the
+// delivered file times it. Nothing here is illustrative, and when no frame
+// comes back the panel says that rather than showing something else.
+
+function frameSrc(run, buyer, index) {
+  return '/frame/' + encodeURIComponent(run.run_id)
+    + '/' + encodeURIComponent(buyer)
+    + '/' + encodeURIComponent(index) + '.jpg';
+}
+
+// Seconds from one SRT stamp, on the same digit rule the measurement used: this
+// track writes two subsecond digits, so ,95 is 950ms and not 95.
+function tcSeconds(stamp) {
+  var m = /^(\\d+):(\\d+):(\\d+)[,.](\\d+)$/.exec(String(stamp || '').trim());
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+    + Number(m[4]) / Math.pow(10, m[4].length);
+}
+
+// What the rule says about this cue, in a sentence, with the published number
+// beside the measured one. Both come off the row; neither is computed here.
+function reelSentence(r, platform) {
+  var places = (r.check === 'line_length' || r.check === 'line_count') ? 0 : 2;
+  var limPlaces = (r.check === 'min_duration' || r.check === 'non_positive_duration') ? 3 : 0;
+  function n(v, p) { return typeof v === 'number' ? v.toFixed(p) : 'n/a'; }
+  var value = '<b class="over">' + n(r.value, places) + '</b>';
+  var limit = '<b>' + n(r.limit, limPlaces) + '</b>';
+  var who = esc(platform);
+  if (r.check === 'reading_speed') {
+    return 'This line runs at ' + value + ' characters per second. '
+      + who + ' publishes ' + limit + '.';
+  }
+  if (r.check === 'min_duration') {
+    return 'This line holds for ' + value + ' seconds. '
+      + who + ' publishes a floor of ' + limit + '.';
+  }
+  if (r.check === 'non_positive_duration') {
+    return 'This line never opens: its out point is not after its in point, '
+      + 'so it holds for ' + value + ' seconds.';
+  }
+  if (r.check === 'line_length') {
+    return 'Its longest line is ' + value + ' characters. ' + who + ' publishes ' + limit + '.';
+  }
+  if (r.check === 'line_count') {
+    return 'It carries ' + value + ' lines. ' + who + ' publishes ' + limit + '.';
+  }
+  return value + ' against a published ' + limit + '.';
+}
+
+// Measured against published, on one scale. The tick is the limit, the bar is
+// the cue. Drawn only when both numbers can share a scale, so a check whose
+// threshold is zero gets the sentence and no picture of nothing.
+function gaugeHtml(r) {
+  var value = Number(r.value), limit = Number(r.limit);
+  if (!isFinite(value) || !isFinite(limit)) return '';
+  var span = Math.max(value, limit) * 1.2;
+  if (!(span > 0)) return '';
+  function pct(x) { return (Math.max(0, Math.min(1, x)) * 100).toFixed(2) + '%'; }
+  return '<div class="gauge">'
+    + '<span class="gauge-bar" style="width:' + pct(value / span) + '"></span>'
+    + '<span class="gauge-tick" style="left:' + pct(limit / span) + '"></span>'
+    + '</div>';
+}
+
+// Six cues from the sheet as it currently stands, the open one among them.
+// Built off the filtered list rather than off the whole track, so the strip is
+// always a run of cues this filter actually raised.
+var STRIP_SIZE = 12;
+function stripHtml(row) {
+  var visible = STATE.visible || [];
+  if (visible.length < 2) return '';
+  var pos = 0;
+  for (var i = 0; i < visible.length; i++) {
+    if (visible[i].index === row.index) { pos = i; break; }
+  }
+  var start = Math.max(0, Math.min(pos - 2, visible.length - STRIP_SIZE));
+  var window_ = visible.slice(start, start + STRIP_SIZE);
+  var cells = window_.map(function(r) {
+    return '<button class="strip-cell' + (r.index === row.index ? ' on' : '') + '" type="button"'
+      + ' data-index="' + esc(r.index) + '"'
+      + ' title="cue ' + pad4(r.index) + ' at ' + esc(r.tc_in) + '">'
+      + '<img alt="" src="' + frameSrc(STATE.run, STATE.buyer, r.index) + '">'
+      + '<span class="strip-num">' + pad4(r.index) + '</span>'
+      + '</button>';
+  }).join('');
+  return '<div class="strip-head">cues either side of it, in this filter</div>'
+    + '<div class="strip" id="strip">' + cells + '</div>';
+}
+
+function showCue(row) {
+  var host = document.getElementById('reel-body');
+  if (!host) return;
+  var run = STATE.run;
+  var entry = run && run.buyers[STATE.buyer];
+  STATE.cue = row ? row.index : null;
+  if (!row || !entry) { host.innerHTML = ''; markSelectedRow(null); return; }
+
+  var seconds = tcSeconds(row.tc_in), out = tcSeconds(row.tc_out);
+  var held = (seconds !== null && out !== null) ? (out - seconds).toFixed(2) + ' s' : '';
+  var source = run.video_url
+    ? '<a href="' + esc(run.video_url) + '" target="_blank" rel="noopener" title="'
+      + esc(run.video_url) + '">' + esc(shortUrl(run.video_url)) + '</a>'
+    : 'the archive.org source';
+
+  host.innerHTML = ''
+    + '<figure class="screen" id="screen">'
+      + '<span class="screen-tc">' + esc(row.tc_in) + '</span>'
+      + '<span class="screen-id">CUE ' + pad4(row.index) + '</span>'
+      + '<div class="screen-hold">cutting this frame off archive.org</div>'
+      + '<div class="screen-sub">' + esc(row.text || '') + '</div>'
+    + '</figure>'
+    + '<div class="reel-cap" id="reel-cap">Frame cut at ' + esc(row.tc_in) + ' from ' + source
+      + ' with ffmpeg. The cue is drawn as the delivered file times it.</div>'
+    + '<div class="reel-read">'
+      + '<div class="rr-rule">' + esc(String(row.rule || row.check).replace(/_/g, ' ')) + '</div>'
+      + gaugeHtml(row)
+      + '<div class="rr-say">' + reelSentence(row, entry.platform) + '</div>'
+      + '<div class="rr-meta">' + esc(row.tc_in) + ' to ' + esc(row.tc_out)
+        + (held ? ' &middot; <b>' + held + '</b> on screen' : '') + '</div>'
+    + '</div>';
+
+  var strip = document.getElementById('strip-wrap');
+  if (strip) strip.innerHTML = stripHtml(row);
+
+  var figure = document.getElementById('screen');
+  var img = new Image();
+  img.className = 'screen-img';
+  img.alt = 'Frame of ' + run.title + ' at ' + row.tc_in;
+  img.addEventListener('load', function() { figure.classList.add('ready'); });
+  img.addEventListener('error', function() {
+    figure.classList.add('gone');
+    var hold = figure.querySelector('.screen-hold');
+    if (hold) hold.textContent = 'no frame came back at this timecode, so none is drawn';
+    // The caption claims a frame was cut. When none was, it has to stop saying so.
+    var cap = document.getElementById('reel-cap');
+    if (cap) {
+      cap.textContent = 'No frame at ' + row.tc_in + '. This box could not cut one from the '
+        + 'archive.org source, so the cue is shown over nothing rather than over a stand-in.';
+    }
+  });
+  img.src = frameSrc(run, STATE.buyer, row.index);
+  figure.insertBefore(img, figure.firstChild);
+  markSelectedRow(row.index);
+}
+
+function markSelectedRow(index) {
+  var host = document.getElementById('cue-rows');
+  if (!host) return;
+  Array.prototype.forEach.call(host.children, function(el) {
+    el.classList.toggle('on', Number(el.dataset.index) === index);
+  });
+}
+
+// Clicking a row far down the sheet changes a picture that may be off screen.
+// Bring it back only when it actually is, so a click near the top does not
+// throw the page around.
+function keepReelInView() {
+  var figure = document.getElementById('screen');
+  if (!figure) return;
+  var box = figure.getBoundingClientRect();
+  if (box.bottom < 72 || box.top > window.innerHeight - 90) {
+    figure.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
 }
 
 function paintAll() {
@@ -1854,7 +2550,7 @@ function paintAll() {
   if (!STATE.engine.gemini) missing.push('Gemini credentials');
   if (missing.length) {
     runBtn.disabled = true;
-    setStatus('This box has no ' + missing.join(' and ') + ', so it serves stored runs only');
+    setStatus('This box is missing ' + missing.join(' and ') + ', so it serves stored runs only');
   }
 })();
 </script>
@@ -1872,7 +2568,37 @@ def render_page(run_id: str = "") -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    prewarm_frames(runstore.load(runstore.default_run_id() or ""))
     return render_page()
+
+
+@app.get("/frame/{run_id}/{buyer}/{cue_index}.jpg")
+def frame(run_id: str, buyer: str, cue_index: int):
+    """The frame of the film at one cue's in-time, cut from the archive source.
+
+    The instant is read off the stored finding, never off the query, so this
+    endpoint can only ever produce a picture of a cue this run measured.
+    """
+    record = runstore.load(run_id)
+    entry = (record or {}).get("buyers", {}).get(buyer)
+    if record is None or entry is None:
+        raise HTTPException(status_code=404, detail="No such run or desk")
+    timecode = ""
+    for finding in entry.get("before", {}).get("findings", []):
+        if finding.get("cue_index") == cue_index:
+            timecode = str(finding.get("timecode", "")).partition(" --> ")[0]
+            break
+    seconds = cue_seconds(timecode)
+    if seconds is None:
+        raise HTTPException(status_code=404, detail="That desk raised no finding on that cue")
+    path = extract_frame(record.get("film_identifier", ""), seconds)
+    if path is None:
+        raise HTTPException(status_code=404, detail="No frame could be cut at that timecode")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/api/runs")
@@ -1889,7 +2615,15 @@ async def api_run(run_id: str):
 
 
 @app.post("/run")
-async def run(identifier: str = Form(default="")):
+def run(identifier: str = Form(default="")):
+    """One live pass of the graph, on a worker thread.
+
+    Deliberately not `async def`. `agent.run_agent` owns its own event loop via
+    `asyncio.run`, which raises the moment it is called on a thread that already
+    has one running, and a run that takes minutes would hold the loop hostage
+    anyway. A sync handler is dispatched to Starlette's threadpool, so the loop
+    stays free to serve the frames the page is fetching while the desks work.
+    """
     try:
         record = agent_mod.run_agent(identifier=identifier.strip() or None)
     except Exception as exc:

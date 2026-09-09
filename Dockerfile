@@ -2,9 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps for curl (archive.org fetch) and ffmpeg (not needed for subtitle-only,
-# but included for completeness if audio QC is added later).
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# curl fetches the subtitle track from archive.org.
+# ffmpeg is load-bearing, not a convenience: the page cuts the real frame of the
+# real film at each illegal cue's own in-time, straight from the archive.org
+# source. Without it the page still renders and says honestly that it could not
+# cut a frame, but the visual argument, a line of dialogue on the frame it is
+# too fast to read on, disappears.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

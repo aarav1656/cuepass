@@ -200,14 +200,22 @@ def test_the_stored_run_evidence_urls_are_all_real_and_flagged():
     if not runs:
         pytest.skip("no run stored yet; run seed_run.py")
     full = runstore.get_run(runs[0]["run_id"])
+    # Richness first. Every assertion below lives inside two loops, so an empty
+    # buyers dict or an empty evidence dict would make this test green while
+    # checking nothing. Same shape as an inequality that holds in both worlds.
+    assert full["buyers"], "no cited profile in the stored run"
+    checked = 0
     for key, buyer in full["buyers"].items():
+        assert buyer["evidence"], f"{key} cites a spec with no evidence behind it"
         for name, ev in buyer["evidence"].items():
+            checked += 1
             assert ev["url"].startswith("http"), f"{key}.{name} has no page behind it"
             assert ev["clause"].strip(), f"{key}.{name} has a value with no clause"
             expected = ev["url"] == buyer["citation_url"]
             assert ev["from_profile_page"] is expected, (
                 f"{key}.{name} mislabels which page it came from"
             )
+    assert checked >= 4, f"only {checked} thresholds checked; expected at least four"
 
 
 def test_a_url_nobody_opened_cannot_become_a_spec():
@@ -877,7 +885,11 @@ def test_the_stored_contrast_lists_every_cue_it_counts():
     if not runs:
         pytest.skip("no run stored yet; run seed_run.py")
     full = runstore.get_run(runs[0]["run_id"])
-    for row in full.get("contrasts", []):
+    # An empty contrasts list would satisfy every assertion below without
+    # examining one.
+    assert full["contrasts"], "the stored run records no contrast to check"
+    for row in full["contrasts"]:
+        assert row["cue_indices"], "a contrast row lists no cue indices"
         assert len(row["cue_indices"]) == row["cues_legal_under_looser_only"], (
             f"{row['stricter']} vs {row['looser']}: counts "
             f"{row['cues_legal_under_looser_only']} but lists {len(row['cue_indices'])}"
@@ -925,7 +937,8 @@ def test_the_stored_run_contrast_is_not_vacuous():
     if not runs:
         pytest.skip("no run stored yet; run seed_run.py")
     full = runstore.get_run(runs[0]["run_id"])
-    for row in full.get("contrasts", []):
+    assert full["contrasts"], "the stored run records no contrast to check"
+    for row in full["contrasts"]:
         assert row["stricter_max_cps"] != row["looser_max_cps"], (
             "a contrast row compares two profiles with the same reading speed"
         )
@@ -1254,12 +1267,18 @@ def test_run_refuses_without_a_model(monkeypatch):
 
 def test_stored_records_are_json_and_carry_provenance():
     """Whatever is on disk has to be loadable and self-describing."""
-    for path in sorted(runstore.SEED_DIR.glob("*.json")):
+    paths = sorted(runstore.SEED_DIR.glob("*.json"))
+    # The seed directory being empty is the one state that makes this test green
+    # and the product broken: no committed run means a cold container renders an
+    # empty page. So absence is the failure, not a reason to skip.
+    assert paths, f"no seeded run in {runstore.SEED_DIR}; run seed_run.py"
+    for path in paths:
         record = json.loads(path.read_text(encoding="utf-8"))
         assert record["measured_at"]
         assert record["framework"] == "google-adk"
         assert "search" in record["parallel_surfaces"]
         assert "extract" in record["parallel_surfaces"]
+        assert record["buyers"], f"{path.name} cites no profile"
         for buyer, entry in record["buyers"].items():
             assert entry["spec"]["source_url"].startswith("http")
             assert entry["verdict"] in ("DELIVER", "HOLD")
@@ -1331,3 +1350,65 @@ def test_a_pinned_threshold_is_never_labelled_live():
     assert evidence["clause"] == pin["clause"]
     assert evidence["url"] == pin["url"]
     assert evidence["url"] != url, "the pin must not borrow the extracted page's URL"
+
+
+def test_the_live_run_endpoint_can_own_an_event_loop():
+    """POST /run must reach `agent.run_agent` with no event loop already running.
+
+    `run_agent` calls `asyncio.run` to drive the ADK graph. An `async def`
+    handler executes on the loop Starlette is already running, so that call
+    raises `asyncio.run() cannot be called from a running event loop` and the
+    page renders LIVE RUN FAILED with a stack trace instead of a measurement.
+    This shipped once. The stand-in below asserts the same precondition the real
+    agent needs, so flipping the handler back to `async def` turns it red.
+
+    Break it by: putting `async` back on `app.run`.
+    """
+    import asyncio
+
+    import app as app_mod
+    from fastapi.testclient import TestClient
+
+    reached: dict[str, object] = {}
+
+    async def _nothing() -> str:
+        return "drove the graph"
+
+    def fake_run_agent(identifier: str | None = None) -> dict:
+        # Exactly what run_agent does with the workflow, minus the network.
+        reached["drove"] = asyncio.run(_nothing())
+        reached["identifier"] = identifier
+        return {
+            "run_id": "loop_probe",
+            "film_title": "probe",
+            "film_identifier": "probe",
+            "subtitle_filename": "probe.srt",
+            "subtitle_url": "https://example.invalid/probe.srt",
+            "cue_count": 0,
+            "buyers": {},
+            "unavailable": {},
+            "editorial": [],
+            "editorial_capped_at": 0,
+            "leftover_cue_total": 0,
+            "contrasts": [],
+            "graph": {"workflow": "cuepass_delivery_desk", "nodes": [], "edges": []},
+            "trace": [],
+            "model": "gemini-2.5-flash",
+            "framework": "google-adk",
+            "parallel_surfaces": ["search", "extract"],
+            "measured_at": "2026-01-01T00:00:00+00:00",
+        }
+
+    original = app_mod.agent_mod.run_agent
+    app_mod.agent_mod.run_agent = fake_run_agent
+    try:
+        with TestClient(app_mod.app) as client:
+            response = client.post("/run", data={"identifier": "probe"})
+    finally:
+        app_mod.agent_mod.run_agent = original
+
+    assert response.status_code == 200, response.text
+    assert reached.get("drove") == "drove the graph", (
+        "POST /run never reached a thread that could own an event loop"
+    )
+    assert reached.get("identifier") == "probe"
