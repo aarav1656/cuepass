@@ -26,3 +26,6 @@ htmlcov/
 .uicraft-read.json
 mitm_mcp_traffic.db
 JCODE-STEER.md
+
+# internal status board, never shipped to judges
+.progress/

@@ -4,6 +4,8 @@
 # ships a container that renders an empty page to the first visitor.
 .git/
 .gitignore
+# The private build ledger never enters an image a judge can pull.
+.progress/
 __pycache__/
 *.py[cod]
 .venv/
