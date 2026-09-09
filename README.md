@@ -37,7 +37,7 @@ Film: **The Iron Mask** (1929), archive.org identifier `iron_mask`
 | Reading speed > 17 cps | **105 / 516 (20.3%)** | 63 | 42 |
 | Duration < 0.833 s | **44 / 516 (8.5%)** | 12 | 32 |
 | Line length > 42 chars | 30 | 30 | 0 (editorial) |
-| Cues changed by repair | — | — | **78** |
+| Cues changed by repair | n/a | n/a | **78** |
 
 The reading-speed violations are ASR artefacts: the speech recognition produces short burst cues that pack many characters into a fraction of a second. The retiming fix extends their display time into the subsequent silence.
 
@@ -54,7 +54,9 @@ Parallel Search (`parallel-web` SDK, `parallel.Parallel.search(search_queries=[.
 
 **Why it is load-bearing:** caption delivery specs change. Netflix revised its TTSS in 2022. Amazon's spec page is different from Netflix's. The BBC has different line-length limits. A tool that hardcodes "17 cps" will silently deliver to the wrong spec when the platform updates. Parallel Search makes the tool's spec current every time it runs.
 
-**If Parallel is unavailable:** the tool falls back to cached constants and labels the result `CACHED SPEC` in the UI. The label is visible; the judge can see the difference.
+**If Parallel is unavailable:** the tool raises and refuses to run. There is no silent fallback to hardcoded constants, so the sheet never cites a spec it did not fetch. The header badge reads `LIVE SPEC` when the thresholds came off the page fetched this run.
+
+**Citation integrity:** the header URL is the one a reviewer clicks, so only a well-formed http(s) URL is ever cited, and the platform's own domain wins over a third-party summary. A real observed search result had a local build path spliced into it (`.../netflix-subtitle-s:Users:kevinrato:Desktop:...`); that URL is now rejected rather than shown.
 
 ---
 
@@ -65,7 +67,19 @@ Gemini (`google-genai` SDK) classifies each failing cue as:
 - `auto_fixable`: the out-time can be extended (reading speed or minimum duration failures).
 - `needs_review`: requires editorial judgment (line length, line count, or a speed failure where the next cue is too close to allow extension).
 
-Without Gemini, the classification falls back to a deterministic rule: `reading_speed` and `min_duration` are always auto-fixable, everything else is not. Gemini adds semantic judgment — it understands that a rapid-fire dialogue exchange is a different editorial problem from a data-on-screen caption.
+There is no deterministic fallback: without credentials the run raises `GeminiUnavailableError` rather than presenting a classification Gemini did not make. Gemini adds semantic judgment: it understands that a rapid-fire dialogue exchange is a different editorial problem from a data-on-screen caption.
+
+---
+
+## What the sheet shows
+
+The spotting sheet leads with the cited spec, then the measurement:
+
+1. **Header:** the spec the file was measured against, its thresholds, and a live citation link.
+2. **Verdict:** timing violations before repair and after, in huge type. The right number comes from a second run of the same check against the repaired .srt on disk, not from subtracting what was fixed.
+3. **Sheet:** every failing cue with index, timecode, cue text, measured value, and the check and limit it broke.
+
+Verified end to end on 2026-09-09, live spec, Gemini via Vertex: **149 timing violations across 516 cues, re-measured to 75.**
 
 ---
 
@@ -85,7 +99,7 @@ uvicorn app:app --reload --port 8000
 # Open http://localhost:8000
 ```
 
-Without API keys, the tool runs with cached spec constants (labelled in the UI) and deterministic classification. All measurement and repair is purely deterministic and works without any API key.
+Without API keys, the tool raises rather than measuring against constants it did not fetch. Measurement and repair themselves are purely deterministic (`measure.py`) and are unit-tested without any key.
 
 ### Run tests
 
@@ -117,8 +131,8 @@ Parallel Search ─→ parallel_spec.py ─→ live platform spec + citation
 
 - Repair only extends out-times. It cannot rewrite line text or split long lines. Line-length and line-count violations require editorial work.
 - ASR subtitles from archive.org are often low quality. The tool measures and repairs the timing, not the accuracy.
-- Gemini classification requires a `GEMINI_API_KEY`; without it, the deterministic fallback is used (accurate but less nuanced).
-- Parallel Search requires a `PARALLEL_API_KEY`; without it, the fallback is clearly labelled.
+- Gemini classification requires credentials (`GEMINI_API_KEY`, or Vertex via `GOOGLE_GENAI_USE_VERTEXAI` plus `GOOGLE_CLOUD_PROJECT`). Without them the run raises.
+- Parallel Search requires a `PARALLEL_API_KEY`. Without it the run raises.
 - The re-measure step only verifies improvement in reading-speed and duration. A zero-violation output is possible only if every tight cue has enough free space after it; in dense dialogue sequences, the ceiling constraint limits how much retiming can do.
 
 ---

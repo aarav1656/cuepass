@@ -73,6 +73,7 @@ class CueFinding:
     value: float
     threshold: float
     unit: str
+    timecode: str  # cue in/out, "HH:MM:SS,mmm --> HH:MM:SS,mmm"
     text_preview: str
     auto_fixable: bool
 
@@ -173,6 +174,7 @@ def measure_subtitles(
     for idx, c in enumerate(cues, start=1):
         chars = len(c["text"].strip())
         preview = c["text"][:60]
+        timecode = f"{_fmt_ts(c['start'])} --> {_fmt_ts(c['end'])}"
 
         # reading speed check
         if c["duration"] > 0 and c["duration"] >= min_duration_s:
@@ -185,6 +187,7 @@ def measure_subtitles(
                         value=round(cps, 2),
                         threshold=max_cps,
                         unit="chars/sec",
+                        timecode=timecode,
                         text_preview=preview,
                         auto_fixable=True,
                     )
@@ -200,6 +203,7 @@ def measure_subtitles(
                     value=round(c["duration"], 3),
                     threshold=min_duration_s,
                     unit="seconds",
+                    timecode=timecode,
                     text_preview=preview,
                     auto_fixable=True,
                 )
@@ -216,6 +220,7 @@ def measure_subtitles(
                     value=float(longest),
                     threshold=float(max_line_chars),
                     unit="chars",
+                    timecode=timecode,
                     text_preview=preview,
                     auto_fixable=False,
                 )
@@ -231,6 +236,7 @@ def measure_subtitles(
                     value=float(len(c["lines"])),
                     threshold=float(max_lines),
                     unit="lines",
+                    timecode=timecode,
                     text_preview=preview,
                     auto_fixable=False,
                 )

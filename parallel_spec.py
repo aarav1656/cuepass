@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,22 @@ _LINE_CHARS_RE = re.compile(r"(\d{2,3})\s*characters?\s*(?:per\s*)?line", re.I)
 _MAX_LINES_RE = re.compile(r"(?:maximum|max)\s+(\d)\s*lines?", re.I)
 
 
+def _is_citable_url(url: str) -> bool:
+    """True only for a URL a reviewer can actually click through to.
+
+    Rejects non-http schemes, missing hosts, and the mangled-path case where a
+    local filesystem path has been spliced into the URL by the upstream index.
+    """
+    if not url:
+        return False
+    parts = urlparse(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return False
+    if ":" in parts.path or " " in url:
+        return False
+    return True
+
+
 def _run_parallel_search(platform: str) -> dict:
     """Run a live Parallel Search and extract thresholds.
 
@@ -154,18 +171,31 @@ def _run_parallel_search(platform: str) -> dict:
     source_label = ""
     raw_results: list[dict] = []
 
+    ref = _REFERENCE_SPECS.get(platform, _REFERENCE_SPECS["netflix"])
+    official_host = urlparse(ref["source_url"]).netloc
+
     for r in search_results:
         url = r.url or ""
         title = r.title or url
         excerpts_text = " ".join(r.excerpts or [])
         all_text += f" {title} {excerpts_text}"
-        if not source_url:
-            source_url = url
-            source_label = title
         raw_results.append({"url": url, "title": title})
 
+    # The citation is shown to a reviewer as a clickable link, so it has to be a
+    # real, well-formed URL. Parallel occasionally returns a result whose URL has
+    # a local build path spliced into it (a real observed case:
+    # ".../netflix-subtitle-s:Users:kevinrato:Desktop:...mdxtyle-guide-explained").
+    # Prefer the platform's own domain, then any well-formed result, then the
+    # known-good reference URL. Never cite a URL we cannot vouch for.
+    citable = [
+        (r["url"], r["title"]) for r in raw_results if _is_citable_url(r["url"])
+    ]
+    first_party = [(u, t) for u, t in citable if urlparse(u).netloc == official_host]
+    for url, title in first_party + citable:
+        source_url, source_label = url, title
+        break
+
     # Extract numeric thresholds from combined text
-    ref = _REFERENCE_SPECS.get(platform, _REFERENCE_SPECS["netflix"])
     cps_match = _CPS_RE.search(all_text)
     line_chars_match = _LINE_CHARS_RE.search(all_text)
     max_lines_match = _MAX_LINES_RE.search(all_text)

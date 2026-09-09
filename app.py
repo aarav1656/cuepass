@@ -1,4 +1,4 @@
-"""FastAPI web application for SIXTEEN SEVENTEEN.
+"""FastAPI web application for Cuepass.
 
 Spotting-sheet UI: near-black Verge 2024 system, Anton display,
 Space Mono labels, mint #3cffd0 for repaired state and primary action only.
@@ -202,10 +202,39 @@ HTML = """<!DOCTYPE html>
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
-    .spec-block {
-      border-left: 2px solid var(--border-hi);
-      padding-left: 10px;
+    /* ---- spec citation: header of the sheet, not a footnote ---- */
+    .spec-header {
+      border-bottom: 1px solid var(--border-hi);
+      background: var(--surface);
+      padding: 14px 24px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      flex-wrap: wrap;
     }
+    .spec-header .spec-platform {
+      font-family: var(--display);
+      font-size: 18px;
+      letter-spacing: 1px;
+    }
+    .spec-thresholds {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-2);
+      letter-spacing: 0.5px;
+    }
+    .spec-thresholds b { color: var(--text); font-weight: 700; }
+    .spec-cite {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.3px;
+      flex-basis: 100%;
+      word-break: break-all;
+    }
+    .spec-cite a { color: var(--mint); text-decoration: underline; }
+    .spec-cite a:hover { color: var(--text); }
+    .spec-cite .cite-label { color: var(--text-3); }
+
     .spec-badge {
       font-family: var(--mono);
       font-size: 9px;
@@ -219,7 +248,7 @@ HTML = """<!DOCTYPE html>
     }
     .spec-badge.live   { border-color: var(--mint); color: var(--mint); }
     .spec-badge.cached { color: var(--text-3); }
-    .spec-block p {
+    .spec-block-unused p {
       font-family: var(--mono);
       font-size: 10px;
       color: var(--text-3);
@@ -272,6 +301,31 @@ HTML = """<!DOCTYPE html>
     .known-tbl tr { cursor: pointer; }
     .known-tbl tr:hover td { background: var(--surface); }
 
+    /* ---- headline measurement: before -> after, second measure ---- */
+    .verdict {
+      padding: 26px 24px 22px;
+      border-bottom: 1px solid var(--border-hi);
+    }
+    .verdict-nums {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-family: var(--display);
+      line-height: 0.9;
+    }
+    .v-before { font-size: 104px; color: var(--red); }
+    .v-arrow  { font-size: 56px; color: var(--text-3); }
+    .v-after  { font-size: 104px; color: var(--mint); }
+    .verdict-caption {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-top: 12px;
+    }
+    .verdict-caption b { color: var(--text-2); font-weight: 700; }
+
     /* ---- summary strip ---- */
     .summary-strip {
       background: var(--surface);
@@ -303,7 +357,7 @@ HTML = """<!DOCTYPE html>
     /* ---- spotting sheet ---- */
     .sheet-header {
       display: grid;
-      grid-template-columns: 52px 1fr 72px 80px;
+      grid-template-columns: 52px 210px 1fr 72px 80px;
       gap: 0 12px;
       padding: 8px 24px;
       border-bottom: 1px solid var(--border-hi);
@@ -316,7 +370,7 @@ HTML = """<!DOCTYPE html>
 
     .cue-row {
       display: grid;
-      grid-template-columns: 52px 1fr 72px 80px;
+      grid-template-columns: 52px 210px 1fr 72px 80px;
       gap: 0 12px;
       padding: 9px 24px;
       border-bottom: 1px solid var(--border);
@@ -342,6 +396,15 @@ HTML = """<!DOCTYPE html>
     }
     .dot.ok       { background: var(--text-3); }
     .dot.repaired { background: var(--mint); }
+
+    .cue-tc {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-2);
+      letter-spacing: -0.2px;
+      padding-top: 2px;
+      white-space: nowrap;
+    }
 
     .cue-text {
       font-family: Georgia, 'Times New Roman', serif;
@@ -442,7 +505,6 @@ HTML = """<!DOCTYPE html>
     </div>
     <button class="run-btn" id="run-btn">Run this track</button>
     <div class="status-line" id="status-line"></div>
-    <div id="spec-area"></div>
   </aside>
 
   <main id="main-area">
@@ -467,7 +529,6 @@ const platSel  = document.getElementById('platform');
 const runBtn   = document.getElementById('run-btn');
 const statLine = document.getElementById('status-line');
 const mainArea = document.getElementById('main-area');
-const specArea = document.getElementById('spec-area');
 
 // click a known-film row to select it
 document.getElementById('known-body').addEventListener('click', e => {
@@ -491,7 +552,6 @@ runBtn.addEventListener('click', async () => {
   const id       = identIn.value.trim() || filmSel.value || '';
   const platform = platSel.value;
   runBtn.disabled = true;
-  specArea.innerHTML = '';
   mainArea.innerHTML = '';
   setStatus('<span class="spinner"></span>fetching spec');
 
@@ -526,14 +586,21 @@ function renderSheet(d) {
   const b = d.before, a = d.after, s = d.spec;
   const cls = d.classification || {};
 
-  // spec citation in sidebar
+  // spec citation: header of the sheet
   var badgeCls = s.is_cached ? 'cached' : 'live';
   var badgeTxt = s.is_cached ? 'CACHED SPEC' : 'LIVE SPEC';
-  specArea.innerHTML = '<div class="spec-block">'
+  var specHtml = '<div class="spec-header">'
     + '<span class="spec-badge ' + badgeCls + '">' + badgeTxt + '</span>'
-    + '<p>' + esc(s.source_label) + '<br>'
+    + '<span class="spec-platform">' + esc(s.platform) + '</span>'
+    + '<span class="spec-thresholds">'
+    + 'max <b>' + s.max_cps + '</b> cps'
+    + ' / min dur <b>' + Number(s.min_duration_s).toFixed(3) + '</b> s'
+    + ' / max <b>' + s.max_line_chars + '</b> chars per line'
+    + ' / max <b>' + s.max_lines + '</b> lines</span>'
+    + '<span class="spec-cite"><span class="cite-label">Measured against: '
+    + esc(s.source_label) + ' </span>'
     + '<a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">'
-    + esc(s.source_url) + '</a></p>'
+    + esc(s.source_url) + '</a></span>'
     + '</div>';
 
   // summary strip
@@ -544,6 +611,20 @@ function renderSheet(d) {
   var durAfter   = a.under_duration_count;
   var changed    = d.cues_changed;
   var maxCps     = s.max_cps;
+
+  // headline: the same check, run twice. before -> after on the repaired file.
+  var fixBefore = overBefore + durBefore;
+  var fixAfter  = overAfter + durAfter;
+  var verdict = '<div class="verdict">'
+    + '<div class="verdict-nums">'
+    + '<span class="v-before">' + fixBefore + '</span>'
+    + '<span class="v-arrow">&rarr;</span>'
+    + '<span class="v-after">' + fixAfter + '</span>'
+    + '</div>'
+    + '<div class="verdict-caption">Timing violations across <b>' + total
+    + '</b> cues, before repair and after, from a second run of the same check '
+    + 'on the repaired file (<b>' + esc(d.repaired_srt_path || 'repaired .srt') + '</b>)</div>'
+    + '</div>';
 
   var strip = '<div class="summary-strip">'
     + '<span class="sum-title">' + esc(d.film_title) + '</span>'
@@ -566,7 +647,7 @@ function renderSheet(d) {
     rowsHtml = '<div class="no-violations">No violations found</div>';
   } else {
     var header = '<div class="sheet-header">'
-      + '<span>#</span><span>TEXT</span>'
+      + '<span>#</span><span>TIMECODE</span><span>TEXT</span>'
       + '<span style="text-align:right">MEASURED</span><span>CHECK</span>'
       + '</div>';
 
@@ -589,6 +670,7 @@ function renderSheet(d) {
 
       return '<div class="cue-row ' + rowCls + '">'
         + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
+        + '<div class="cue-tc">' + esc(f.timecode || '') + '</div>'
         + '<div class="cue-text">' + esc(f.text_preview || '') + '</div>'
         + '<div class="cue-val ' + valCls + '">' + val
         + '<small>' + esc(f.unit) + '</small></div>'
@@ -600,7 +682,7 @@ function renderSheet(d) {
     rowsHtml = header + rows;
   }
 
-  mainArea.innerHTML = strip + rowsHtml;
+  mainArea.innerHTML = specHtml + verdict + strip + rowsHtml;
 }
 </script>
 </body>
@@ -641,7 +723,7 @@ async def run(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "sixteen-seventeen"}
+    return {"status": "ok", "service": "cuepass"}
 
 
 if __name__ == "__main__":

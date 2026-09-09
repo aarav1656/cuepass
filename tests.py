@@ -13,6 +13,7 @@ import textwrap
 import pytest
 
 import measure as m
+import parallel_spec
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -320,3 +321,43 @@ class TestSpecApplication:
         report = m.measure_subtitles(CLEAN_SRT, spec=spec)
         assert report.spec_source_url == "https://example.com/spec"
         assert not report.spec_is_cached
+
+
+class TestFindingTimecode:
+    """A reviewer has to be able to jump to the failing cue in their editor,
+    so every finding carries the cue's own in/out timecode."""
+
+    def test_finding_carries_cue_timecode(self):
+        srt = "1\n00:00:01,000 --> 00:00:01,200\nA line that is far too fast to read\n"
+        findings = m.measure_subtitles(srt).findings_as_dicts()
+        assert findings, "expected the short cue to produce a finding"
+        assert all(f["timecode"] == "00:00:01,000 --> 00:00:01,200" for f in findings)
+
+    def test_timecode_tracks_the_cue_it_describes(self):
+        """Guard against every finding reporting the first cue's timecode."""
+        srt = (
+            "1\n00:00:01,000 --> 00:00:01,200\nFirst cue far too fast to read\n\n"
+            "2\n00:10:05,500 --> 00:10:05,600\nSecond cue also far too fast\n"
+        )
+        by_cue = {f["cue_index"]: f["timecode"] for f in m.measure_subtitles(srt).findings_as_dicts()}
+        assert by_cue[1].startswith("00:00:01,000")
+        assert by_cue[2].startswith("00:10:05,500")
+
+
+class TestCitableUrl:
+    """The spec URL is rendered as a clickable citation, so a malformed URL
+    from the search index must never reach the sheet."""
+
+    def test_rejects_url_with_local_path_spliced_in(self):
+        # Real observed Parallel result.
+        bad = ("https://subtitlesedit.com/blog/netflix-subtitle-s:Users:kevinrato:"
+               "Desktop:subtitlesedit:posts:netflix.mdxtyle-guide-explained")
+        assert not parallel_spec._is_citable_url(bad)
+
+    def test_accepts_real_spec_url(self):
+        good = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617"
+        assert parallel_spec._is_citable_url(good)
+
+    def test_rejects_empty_and_non_http(self):
+        assert not parallel_spec._is_citable_url("")
+        assert not parallel_spec._is_citable_url("ftp://example.com/spec")

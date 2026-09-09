@@ -14,3 +14,6 @@ data/
 .pytest_cache/
 .coverage
 htmlcov/
+.uicraft-read.json
+mitm_mcp_traffic.db
+JCODE-STEER.md
