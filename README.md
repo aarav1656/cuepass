@@ -14,6 +14,21 @@ prove it, and hands a human the list it deliberately did not touch.
 
 ## Which number, not the arithmetic
 
+![One publisher, two live pages, and a cue that is legal and illegal at the same time](docs/problem/cuepass-fork.png)
+
+The flow forks at the first stage and never rejoins, because in the problem it
+draws nothing can cross the middle: the file has one duration and one character
+count, and the verdict still depends on which Netflix article somebody opened.
+The worked example on it, 76 characters over 4.0 seconds, is chosen so the
+arithmetic checks by hand. It is not a cue from the fixture below, and the
+diagram says so on its own conclusion card.
+
+Both limits are captured as dated evidence rather than quoted from memory:
+[`217350977` at 20 cps](docs/problem/evidence/netflix-ttsg-20cps.png) and
+[`219375728` at 17 cps](docs/problem/evidence/netflix-templates-17cps.png), both
+fetched 2026-09-09, each with its URL and the sha256 of the PNG bytes recorded
+in the capture receipt beside them.
+
 Characters divided by seconds is arithmetic. The hard part is that a caption
 specification is not a constant.
 

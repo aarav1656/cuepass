@@ -58,6 +58,15 @@ A subtitle QC tool with `MAX_CPS = 17` in its source holds one of those numbers.
 
 ### Inspiration
 
+![One publisher, two live pages, and a cue that is legal and illegal at the same time](problem/cuepass-fork.png)
+
+That is the whole problem in one picture. It forks at the first stage and never
+rejoins, because nothing can cross the middle: one duration, one character
+count, two published answers. The 76 characters over 4.0 seconds on it is a
+worked example sized so the arithmetic checks by hand, not a cue quoted from our
+fixture. Both Netflix pages behind it are captured as dated screenshots in
+`problem/evidence/`, with the URL and the sha256 of each PNG.
+
 A distributor delivers a finished restoration and it comes back four weeks later, rejected on caption spec. The frustrating part is not that somebody measured wrong. It is that "the Netflix limit" is not a single fact.
 
 Netflix's own partner documentation makes that concrete. Article `217350977` is the English Timed Text Style Guide, and its reading-speed section gives adult programs up to 20 characters per second. Article `219375728` is the Timed Text Style Guide for subtitle templates, and its reading-speed section gives adult programs up to 17. Neither page is stale and neither is wrong. They are two scopes, published in parallel, and which one a delivery is held to depends on how that delivery was authored. The same fork appears at the children's tier, 17 against 15.
