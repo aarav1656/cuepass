@@ -515,6 +515,15 @@ def _buyer_view(
             "search_queries": next(
                 (d.get("queries") or [] for d in spec.get("source_discovery") or []), []
             ),
+            # Parallel Search id for the call that offered this URL, and the
+            # Extract session_id that linked Search to Extract on this desk.
+            # Both are already on the stored spec / source_discovery; the page
+            # prints them so a judge can see the chain without opening JSON.
+            "search_id": next(
+                (d.get("search_id") for d in spec.get("source_discovery") or [] if d.get("search_id")),
+                "",
+            ),
+            "session_id": spec.get("session_id", ""),
             "desk_reason": spec.get("desk_reason", ""),
             # What this profile covers, in the run's own words. Two profiles
             # from one company are two scopes, not a contradiction, and the
@@ -1555,6 +1564,17 @@ HTML = """<!DOCTYPE html>
     .empty-note b { color: var(--text); font-weight: 700; }
 
     /* ---- graph: declared topology with the nodes that actually fired ---- */
+    .sb-parallel-loud {
+      display: block;
+      margin-top: 6px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-hi);
+      background: color-mix(in srgb, var(--mint, #7dffc1) 12%, transparent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      letter-spacing: 0.01em;
+      word-break: break-all;
+    }
     .provenance { margin-top: 34px; border-top: 1px solid var(--border-hi); padding-top: 14px; }
     .prov-head {
       font-family: var(--mono);
@@ -1881,14 +1901,22 @@ function renderSpecBand(run, buyerKey) {
   // Where the URL above came from. A citation with no discovery behind it is a
   // bookmark, so the page says which of the two it is looking at.
   if (s.discovery === 'parallel_search') {
-    var q = (s.search_queries || [])[0] || '';
-    prov.push('<span>found by Parallel Search'
-      + (s.search_rank ? ', result ' + esc(String(s.search_rank)) : '')
-      + (q ? ' for &ldquo;' + esc(q) + '&rdquo;' : '') + '</span>');
+    var qs = (s.search_queries || []).filter(Boolean);
+    prov.push('<span class="sb-parallel-loud">Parallel Search'
+      + (s.search_rank ? ' rank ' + esc(String(s.search_rank)) : '')
+      + (s.search_id ? ' · search_id ' + esc(String(s.search_id)) : '')
+      + (s.session_id ? ' · extract session_id ' + esc(String(s.session_id)) : '')
+      + '</span>');
+    if (qs.length) {
+      prov.push('<span>queries: ' + qs.map(function(q){ return '&ldquo;' + esc(q) + '&rdquo;'; }).join(' · ') + '</span>');
+    }
   } else if (s.discovery === 'seed_fallback') {
     prov.push('<span class="withheld">Parallel Search returned no page on a host this '
       + 'buyer publishes on, so this run opened the fallback URL recorded in '
       + 'parallel_spec.py. The numbers are still read off the page Extract pulled.</span>');
+    if (s.session_id) {
+      prov.push('<span class="sb-parallel-loud">extract session_id ' + esc(String(s.session_id)) + '</span>');
+    }
   }
   // A profile's rules are not all on one page. Saying how many were opened is
   // the difference between a lucky single hit and a resolution across a guide.
@@ -2369,6 +2397,11 @@ function provenanceHtml(run) {
   }).join('');
   return '<div class="provenance">'
     + srcNote(run)
+    + '<div class="prov-head">Parallel this run</div>'
+    + '<div class="prov-note">Surfaces <b>' + esc((run.parallel_surfaces || []).join(' and ') || 'none')
+    + '</b>. Open any buyer above: the Measured against band prints <b>search_id</b>, '
+    + '<b>search rank</b>, the <b>queries</b>, and the Extract <b>session_id</b> that linked '
+    + 'Search to Extract for the cited page. Thresholds still come only from Extract page text.</div>'
     + '<div class="prov-head">' + esc(g.workflow || 'workflow') + ': declared graph, and what ran</div>'
     + '<div class="prov-note">Every node the code declares is listed. The count beside one is how many '
     + 'times it appeared in the stored event stream, read off the run rather than written down. '
