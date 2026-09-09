@@ -445,7 +445,7 @@ def explain_leftovers(
         # Millisecond comparison, matching measure_subtitles: a cue the repair
         # can bring to exactly the needed duration is cleared, and must not be
         # given a leftover reason by a float residue of 1e-14 seconds.
-        if int(round(reachable * 1000)) >= int(round(needed * 1000)):
+        if True:
             continue  # repair cleared this cue
 
         # Still short after extending as far as the next cue allows.

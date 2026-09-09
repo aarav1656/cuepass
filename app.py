@@ -360,36 +360,47 @@ def _trace_marks(record: dict) -> dict:
     return fired
 
 
-def _contrast(record: dict) -> dict | None:
-    """Two published profiles that set different reading speeds, and the gap.
+def _contrasts(record: dict) -> list[dict]:
+    """Every pair of published profiles that set different reading speeds.
 
     This is the run's sharpest output: the count of cues that clear one
-    published profile and fail another, same file, same code, same run. It is
-    only ever present when two profiles genuinely differ, so when the run finds
-    no disagreement the page shows nothing rather than an empty frame.
+    published profile and fail another, same file, same code, same run.
+
+    Every row is carried, not just the first. Three profiles at three different
+    reading speeds produce three pairs, and rendering one of them would drop
+    measured evidence while looking complete. The list is empty when no two
+    profiles differ, which is the honest state: the page then shows nothing
+    rather than an empty frame.
     """
-    rows = record.get("contrasts") or []
-    if not rows:
-        return None
-    row = rows[0]
-    count = row.get("cues_legal_under_looser_only", 0)
-    if not count:
-        return None
-    return {
-        "stricter": row.get("stricter", ""),
-        "looser": row.get("looser", ""),
-        "stricter_platform": row.get("stricter_platform", ""),
-        "looser_platform": row.get("looser_platform", ""),
-        "stricter_max_cps": row.get("stricter_max_cps"),
-        "looser_max_cps": row.get("looser_max_cps"),
-        "stricter_clause": row.get("stricter_clause", ""),
-        "looser_clause": row.get("looser_clause", ""),
-        "stricter_url": safe_url(row.get("stricter_url", "")),
-        "looser_url": safe_url(row.get("looser_url", "")),
-        "stricter_scope": row.get("stricter_scope", ""),
-        "looser_scope": row.get("looser_scope", ""),
-        "count": count,
-    }
+    out = []
+    for row in record.get("contrasts") or []:
+        count = row.get("cues_legal_under_looser_only", 0)
+        if not count:
+            continue
+        out.append(
+            {
+                "stricter": row.get("stricter", ""),
+                "looser": row.get("looser", ""),
+                "stricter_platform": row.get("stricter_platform", ""),
+                "looser_platform": row.get("looser_platform", ""),
+                "stricter_max_cps": row.get("stricter_max_cps"),
+                "looser_max_cps": row.get("looser_max_cps"),
+                "stricter_clause": row.get("stricter_clause", ""),
+                "looser_clause": row.get("looser_clause", ""),
+                "stricter_url": safe_url(row.get("stricter_url", "")),
+                "looser_url": safe_url(row.get("looser_url", "")),
+                "stricter_scope": row.get("stricter_scope", ""),
+                "looser_scope": row.get("looser_scope", ""),
+                "cue_indices": list(row.get("cue_indices") or []),
+                "count": count,
+                # The headline count and the list of cues behind it are two
+                # fields, so they can disagree. If the list is ever shorter, the
+                # block must not offer to show N cues and then produce fewer:
+                # the number would stay right while the evidence quietly shrank.
+                "evidence_complete": count == len(row.get("cue_indices") or []),
+            }
+        )
+    return out
 
 
 def ui_run(record: dict) -> dict:
@@ -399,11 +410,14 @@ def ui_run(record: dict) -> dict:
     raw_buyers = record.get("buyers") or {}
     # The cue text is the same for every desk, so the track is parsed once.
     full_text = _full_text(record, _default_buyer(raw_buyers)) if raw_buyers else {}
-    contrast = _contrast(record)
-    # Only the stricter profile raises the cues in the gap, so only its sheet
-    # can mark them. Marking them on the looser profile would flag cues that
-    # profile's own page calls legal.
-    gap = set((record.get("contrasts") or [{}])[0].get("cue_indices", [])) if contrast else set()
+    contrasts = _contrasts(record)
+    # Only the stricter side of a pair raises the cues in its gap, so only that
+    # profile's sheet may mark them: marking them on the looser side would flag
+    # cues that profile's own page calls legal. A profile can be the stricter
+    # side of more than one pair, so the marks are the union of those gaps.
+    gaps: dict[str, set[int]] = {}
+    for row in contrasts:
+        gaps.setdefault(row["stricter"], set()).update(row["cue_indices"])
     buyers = {
         key: _buyer_view(
             key,
@@ -411,7 +425,7 @@ def ui_run(record: dict) -> dict:
             editorial,
             repaired_files.get(key, ""),
             full_text,
-            gap if contrast and key == contrast["stricter"] else set(),
+            gaps.get(key, set()),
         )
         for key, entry in raw_buyers.items()
     }
@@ -426,7 +440,7 @@ def ui_run(record: dict) -> dict:
         "cue_count": record.get("cue_count", 0),
         "buyers": buyers,
         "default_buyer": _default_buyer(raw_buyers),
-        "contrast": contrast,
+        "contrasts": contrasts,
         "unavailable": record.get("unavailable") or {},
         "graph": record.get("graph") or {},
         "fired": _trace_marks(record),
@@ -857,6 +871,13 @@ HTML = """<!DOCTYPE html>
     .c-side a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid var(--border-hi); margin-left: 7px; }
     .c-side a:hover { color: var(--mint); border-color: var(--mint); }
     .c-side .c-name { color: var(--text-2); margin-left: 7px; }
+    .c-partial {
+      display: block;
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--red);
+      margin-top: 8px;
+    }
     .c-go {
       display: inline-block;
       font-size: 11px;
@@ -1389,30 +1410,45 @@ function renderSpecBand(run, buyerKey) {
 // contradiction: both pages are current and both are correct for what they
 // cover, and the whole point is that a tool with the number in its source could
 // not tell them apart.
-function renderContrast(c) {
-  if (!c) return '';
+function renderContrast(list) {
+  if (!list || !list.length) return '';
   function side(cps, platform, url) {
     var name = url
       ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(platform) + '</a>'
       : '<span class="c-name">' + esc(platform) + '</span>';
     return '<span class="c-side"><b>' + esc(String(cps)) + '</b> cps' + name + '</span>';
   }
-  return '<div class="rail-group">'
-    + '<div class="rail-head">Two published profiles</div>'
-    + '<button class="contrast" type="button" data-contrast="1">'
+  // One block per differing pair. The heading counts nothing: three profiles at
+  // three reading speeds produce three pairs, and a heading that says "two"
+  // above them would be the same stale-tally bug as any other hardcoded count.
+  var blocks = list.map(function(c, i) {
+    // The headline is the measured count. The offer below it is only ever for
+    // the cues actually listed, so clicking can never deliver less than it
+    // promised, and a short list is stated rather than quietly absorbed.
+    var listed = (c.cue_indices || []).length;
+    var partial = c.evidence_complete === false;
+    return '<button class="contrast" type="button" data-contrast="' + i + '">'
       + '<span class="c-num">' + num(c.count) + '</span>'
-      + '<span class="c-say">cues pass one published profile and fail the other. Two scopes, '
-      + 'both current, both read live this run.</span>'
+      + '<span class="c-say">cues clear the looser of these profiles and fail the stricter. '
+      + 'Both scopes current, both read live this run.</span>'
       + side(c.looser_max_cps, c.looser_platform, c.looser_url)
       + side(c.stricter_max_cps, c.stricter_platform, c.stricter_url)
-      + '<span class="c-go">Show me the ' + num(c.count) + ' cues</span>'
-    + '</button>'
+      + (partial
+          ? '<span class="c-partial">This run recorded ' + num(listed) + ' of them by cue number, '
+            + 'so only those can be shown.</span>'
+          : '')
+      + '<span class="c-go">Show me the ' + num(partial ? listed : c.count) + ' cues</span>'
+      + '</button>';
+  }).join('');
+  return '<div class="rail-group">'
+    + '<div class="rail-head">Where the published profiles differ</div>'
+    + blocks
     + '</div>';
 }
 
 function renderRail(state) {
   var run = state.run;
-  var html = run ? renderContrast(run.contrast) : '';
+  var html = run ? renderContrast(run.contrasts) : '';
   if (run) {
     var desks = Object.keys(run.buyers).sort(function(a, b) {
       return run.buyers[b].totals.violations - run.buyers[a].totals.violations;
@@ -1472,9 +1508,11 @@ rail.addEventListener('click', function(e) {
   // The contrast is a claim about a number, so clicking it has to show the
   // cues that number counts, on the profile that raises them.
   var box = e.target.closest('.contrast');
-  if (box && STATE.run && STATE.run.contrast) {
+  if (box && STATE.run && STATE.run.contrasts) {
     if (e.target.closest('a')) return;
-    STATE.buyer = STATE.run.contrast.stricter;
+    var pair = STATE.run.contrasts[Number(box.dataset.contrast)];
+    if (!pair) return;
+    STATE.buyer = pair.stricter;
     STATE.mode = 'contrast';
     paintAll();
     var sheet = document.getElementById('sheet');
@@ -1640,7 +1678,7 @@ function renderSheet(state) {
     + reasonsPresent(allRows).map(function(reason) {
         return flt(reason, CHIP_LABEL[reason] || reason, counts.by[reason]);
       }).join('')
-    + (contrastCount ? flt('contrast', 'legal on the other profile', contrastCount) : '')
+    + (contrastCount ? flt('contrast', 'legal on a looser profile', contrastCount) : '')
     + flt('all', 'all', counts.all)
     + '</div>';
   var head = '<div class="sheet-head">'

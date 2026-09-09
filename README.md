@@ -10,6 +10,7 @@ human the list it could not fix.
 
 Built for the Agentic Cinema hackathon, Parallel track. Google Cloud via Gemini on
 Vertex AI and `google-adk`. Partner via the `parallel-web` SDK, Search and Extract.
+Partner wiring: `ARCHITECTURE.md`.
 
 ---
 
@@ -71,8 +72,9 @@ on that page that states it.
 ```
 
 That is a real `google.adk.workflow.Workflow`, built in `cuepass_agents.py:build_workflow`.
-The five desks run concurrently because they are five independent research jobs; a
-`JoinNode` holds the deterministic half back until all five report. `graph_shape()`
+The desks run concurrently, one per delivery profile, because each is an
+independent research job; a
+`JoinNode` holds the deterministic half back until every desk reports. `graph_shape()`
 reads the topology off the built graph, and `agent.py` records which nodes and tool
 calls actually fired, so the page can show the declared graph beside the executed
 one rather than a drawing.

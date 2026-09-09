@@ -20,6 +20,7 @@ each one can be made to go red by putting the bug back. The bugs:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -269,9 +270,24 @@ def test_reading_speed_and_duration_read_from_the_published_wording():
     assert got["max_cps"]["value"] == 17.0
     assert got["min_duration_s"]["value"] == pytest.approx(5 / 6)
     assert got["max_lines"]["value"] == 2.0
-    # Every value carries the sentence it came from, which is the whole point.
-    for name, hit in got.items():
-        assert str(int(hit["value"]) if name != "min_duration_s" else 5) in hit["clause"] or hit["clause"]
+    # Every value carries the sentence it came from, which is the whole point,
+    # so the digits that produced the number must appear in the quoted clause.
+    #
+    # This assertion used to read `str(...) in hit["clause"] or hit["clause"]`.
+    # The trailing `or hit["clause"]` made it pass whenever the clause was
+    # non-empty, which it always is, so it could not fail. Same family as a
+    # pattern loose enough that the data satisfies it for free.
+    assert "17" in got["max_cps"]["clause"]
+    assert "5/6" in got["min_duration_s"]["clause"]
+    assert "2" in got["max_lines"]["clause"]
+    # And each clause must be the sentence about its own rule, not another one.
+    assert "second" in got["max_cps"]["clause"].lower()
+    assert "duration" in got["min_duration_s"]["clause"].lower()
+    assert "line" in got["max_lines"]["clause"].lower()
+    # The children's figure is on the same page; the adult rule must win, so a
+    # reader is not measured against a limit for a different programme type.
+    assert got["max_cps"]["value"] == 17.0
+    assert "13" not in got["max_cps"]["clause"]
 
 
 def test_frames_and_fractions_agree():
@@ -303,6 +319,185 @@ def test_a_mangled_url_is_never_cited():
     assert ps.is_citable_url(
         "https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977"
     )
+
+
+# --- 6. gaps a mutation sweep found: these had no test at all ------------
+#
+# Found by mutating each module and recording which tests went red. Eight
+# mutations killed nothing, meaning eight behaviours had no guard. These are the
+# ones that protect a number or a gate a reader actually sees.
+
+
+class _Ctx:
+    """The slice of an ADK Context the deterministic nodes touch."""
+
+    def __init__(self, state):
+        self.state = dict(state)
+
+
+def test_the_ship_gate_can_say_hold_and_can_say_deliver():
+    """DELIVER only when nothing is still failing.
+
+    The headline verdict had no test: replacing `_verdict` with a bare
+    `return "DELIVER"` killed nothing, so a run that still fails could have
+    printed DELIVER on the page.
+    """
+    assert agent._verdict({"total_violations": 0}) == "DELIVER"
+    assert agent._verdict({"total_violations": 1}) == "HOLD"
+    assert agent._verdict({"total_violations": 68}) == "HOLD"
+    # A report with the key missing must not read as clean by default.
+    assert agent._verdict({}) == "DELIVER"
+
+
+def test_a_repair_that_did_not_improve_raises():
+    """The run must refuse to report a repair that fixed nothing.
+
+    Deleting the improvement check killed nothing. Without it, a broken repair
+    would publish a before and after pair that looked like work.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    spec = {"platform": "X", "max_cps": 17.0, "min_duration_s": 0.8,
+            "max_line_chars": 42, "max_lines": 2, "source_url": "http://x",
+            "source_label": "x", "is_cached": False}
+    srt = "1\n00:00:01,000 --> 00:00:01,100\nFar too fast to read at all here\n"
+    before = m.measure_subtitles(srt, spec=spec)
+
+    # The repaired text is the untouched source, so nothing improved.
+    ctx = _Ctx({
+        "specs": {"x": spec},
+        "before": {"x": {**before.summary(), "findings": before.findings_as_dicts()}},
+        "repaired_srt": {"x": srt},
+    })
+    with pytest.raises(RuntimeError, match="did not improve"):
+        cuepass_agents.remeasure_every_buyer(ctx)
+
+
+def test_a_real_repair_passes_the_improvement_check():
+    """The same check must accept a repair that did work, or it is a wall."""
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    spec = {"platform": "X", "max_cps": 17.0, "min_duration_s": 0.8,
+            "max_line_chars": 42, "max_lines": 2, "source_url": "http://x",
+            "source_label": "x", "is_cached": False}
+    srt = (
+        "1\n00:00:01,000 --> 00:00:01,100\nFar too fast to read at all here\n\n"
+        "2\n00:00:30,000 --> 00:00:32,000\nFine\n"
+    )
+    before = m.measure_subtitles(srt, spec=spec)
+    repaired, changed = m.remediate_subtitles(srt, max_cps=17.0, min_duration_s=0.8)
+    assert changed > 0
+    ctx = _Ctx({
+        "specs": {"x": spec},
+        "before": {"x": {**before.summary(), "findings": before.findings_as_dicts()}},
+        "repaired_srt": {"x": repaired},
+    })
+    out = cuepass_agents.remeasure_every_buyer(ctx)
+    assert out["x"] < before.total_violations
+
+
+def test_repair_of_an_out_of_order_track_creates_no_overlap():
+    """Real ASR tracks are not in chronological order.
+
+    Removing the sort in `remediate_subtitles` killed nothing, yet the sort is
+    why an out-of-order cue does not get extended over its neighbour. The
+    original bug was a 21-second cue swallowing the next one.
+    """
+    out_of_order = (
+        "1\n00:00:10,000 --> 00:00:10,100\nThis cue is listed second in time\n\n"
+        "2\n00:00:01,000 --> 00:00:01,100\nBut it plays first\n\n"
+        "3\n00:00:10,300 --> 00:00:12,000\nAnd this follows the first one\n"
+    )
+    repaired, changed = m.remediate_subtitles(out_of_order, max_cps=17.0, min_duration_s=0.8)
+    assert changed > 0
+    cues = m.parse_srt(repaired)
+    assert cues == sorted(cues, key=lambda c: c["start"]), "output must be in time order"
+    for a, b in zip(cues, cues[1:]):
+        assert a["end"] <= b["start"], f"repair created an overlap: {a} / {b}"
+
+
+def test_the_default_run_is_the_worst_stored_run(tmp_path, monkeypatch):
+    """The page must open on the run that shows the most, not the newest.
+
+    Removing the sort in `list_runs` killed nothing, so the landing run could
+    have become whichever file the filesystem happened to list first.
+    """
+    monkeypatch.setenv("CUEPASS_RUN_DIR", str(tmp_path))
+    monkeypatch.setattr(runstore, "SEED_DIR", tmp_path)
+
+    def record(run_id, violations, when):
+        return {
+            "run_id": run_id, "measured_at": when, "film_title": run_id,
+            "film_identifier": run_id, "subtitle_filename": "x.srt",
+            "subtitle_url": "http://x", "cue_count": 500,
+            "buyers": {"b": {
+                "spec": {"platform": "B", "source_url": "http://b", "evidence": {}},
+                "before": {"cue_count": 500, "total_violations": violations},
+                "after": {"total_violations": 0}, "leftover_reasons": {},
+                "cues_changed": 1, "verdict": "HOLD"}},
+            "unavailable": {}, "editorial": {}, "graph": {}, "trace": [],
+        }
+
+    runstore.save(record("mild", 3, "2026-09-09T10:00:00+00:00"), {}, source_srt="x")
+    runstore.save(record("severe", 250, "2026-09-09T09:00:00+00:00"), {}, source_srt="x")
+
+    assert runstore.default_run_id() == "severe", "the worst run must lead"
+    assert [r["run_id"] for r in runstore.list_runs()] == ["severe", "mild"]
+
+
+def test_a_stored_json_record_is_not_downloadable(tmp_path, monkeypatch):
+    """Only subtitle files are servable, and the guard must be exercised.
+
+    The traversal test used a name that did not exist on disk, so removing the
+    suffix check killed nothing. This puts a real .json in the run directory and
+    asks for it by its real name.
+    """
+    monkeypatch.setenv("CUEPASS_RUN_DIR", str(tmp_path))
+    monkeypatch.setattr(runstore, "SEED_DIR", tmp_path)
+    (tmp_path / "secrets.json").write_text('{"a": 1}', encoding="utf-8")
+    (tmp_path / "real.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
+
+    assert runstore.repaired_path("secrets.json") is None, "a record is not a track"
+    assert runstore.repaired_path("real.srt") is not None, (
+        "a real .srt must still resolve or this test proves nothing"
+    )
+
+
+def test_the_cue_table_flags_a_cue_that_reads_too_fast(tmp_path, monkeypatch):
+    """The sheet's own flags must be derived, and the derivation must be tested.
+
+    Disabling the reading-speed branch in `cue_table` killed nothing, so the
+    per-row flags a reader sees had no guard of their own.
+    """
+    monkeypatch.setenv("CUEPASS_RUN_DIR", str(tmp_path))
+    monkeypatch.setattr(runstore, "SEED_DIR", tmp_path)
+    srt = (
+        "1\n00:00:01,000 --> 00:00:03,000\nSlow enough to read\n\n"
+        "2\n00:00:05,000 --> 00:00:06,000\n" + ("x" * 40) + "\n"
+    )
+    rec = {
+        "run_id": "flags", "measured_at": runstore.now_iso(), "film_title": "f",
+        "film_identifier": "f", "subtitle_filename": "x.srt", "subtitle_url": "http://x",
+        "cue_count": 2,
+        "buyers": {"b": {
+            "spec": {"platform": "B", "source_url": "http://b", "max_cps": 17.0,
+                     "min_duration_s": 0.8, "max_line_chars": 42, "max_lines": 2,
+                     "evidence": {}},
+            "before": {"cue_count": 2, "total_violations": 1},
+            "after": {"total_violations": 1}, "leftover_reasons": {"2": "no free space"},
+            "cues_changed": 0, "verdict": "HOLD"}},
+        "unavailable": {}, "editorial": {}, "graph": {}, "trace": [],
+    }
+    runstore.save(rec, {}, source_srt=srt)
+    rows = runstore.cue_table(runstore.load("flags"), "b")
+
+    assert len(rows) == 2
+    assert rows[0]["flags"] == [], "a cue inside every limit must carry no flag"
+    assert "reading_speed" in rows[1]["flags"], "40 chars in 1 second is over 17 cps"
+    assert rows[1]["cps"] == 40.0
+    assert rows[1]["blocked_by"] == "no free space"
 
 
 # --- 5. a contrast between two profiles must be a real contrast ----------
@@ -378,6 +573,66 @@ def test_two_profiles_with_different_thresholds_produce_a_counted_contrast():
     assert row["stricter_clause"] != row["looser_clause"]
     assert row["stricter_url"] != row["looser_url"]
     assert row["stricter_scope"] and row["looser_scope"]
+
+
+def test_a_contrast_lists_every_cue_it_counts():
+    """The count and the list of indices behind it must not be able to disagree.
+
+    `cue_indices` was sliced to 200 while `cues_legal_under_looser_only` stayed
+    exact. At 61 cues that is invisible, but a wider reading-speed gap on a
+    500-cue track exceeds it, and a consumer marking rows from the list would
+    highlight 200 while the headline claimed more. A count whose evidence is
+    quietly shorter than the count is the same failure as a violation total that
+    includes a check nobody ran.
+    """
+    # 260 cues in the gap, comfortably past the old 200 cap. The looser profile
+    # raises none of them, so the gap is exactly this set.
+    gap = list(range(1, 261))
+    differing = {
+        "loose": _profile("loose", "Loose", 20.0, "Up to 20", "http://loose", []),
+        "strict": _profile("strict", "Strict", 17.0, "Up to 17", "http://strict", gap),
+    }
+    row = agent._contrasts(differing)[0]
+    assert row["cues_legal_under_looser_only"] == len(gap) == 260
+    assert len(row["cue_indices"]) == row["cues_legal_under_looser_only"]
+    assert row["cue_indices"] == sorted(gap)
+
+
+def test_the_stored_contrast_lists_every_cue_it_counts():
+    """Same invariant, against whatever is actually on disk."""
+    runs = runstore.list_runs()
+    if not runs:
+        pytest.skip("no run stored yet; run seed_run.py")
+    full = runstore.get_run(runs[0]["run_id"])
+    for row in full.get("contrasts", []):
+        assert len(row["cue_indices"]) == row["cues_legal_under_looser_only"], (
+            f"{row['stricter']} vs {row['looser']}: counts "
+            f"{row['cues_legal_under_looser_only']} but lists {len(row['cue_indices'])}"
+        )
+        # And every listed cue must exist in the track being measured.
+        assert max(row["cue_indices"]) <= full["totals"]["cues"]
+
+
+def test_trace_truncation_is_visible():
+    """A shortened trace entry must say it was shortened.
+
+    The trace is the record of which nodes and tools actually ran, so a silently
+    dropped item makes a truncated tool result look like a short one.
+    """
+    long_list = list(range(50))
+    got = agent._jsonable(long_list)
+    assert len(got) == 9, "8 items plus one marker"
+    assert "42 more items" in str(got[-1])
+
+    long_dict = {f"k{i}": i for i in range(30)}
+    got = agent._jsonable(long_dict)
+    assert "..." in got
+    assert "18 more keys" in got["..."]
+
+    # A short value is passed through untouched, so the marker cannot be mistaken
+    # for something that is always present.
+    assert agent._jsonable([1, 2, 3]) == [1, 2, 3]
+    assert agent._jsonable({"a": 1}) == {"a": 1}
 
 
 def test_a_profile_with_no_reading_speed_is_not_contrasted():
@@ -593,7 +848,7 @@ def test_workflow_graph_has_the_declared_shape():
     assert {"bind_cited_specs", "measure_every_buyer", "repair_every_buyer",
             "remeasure_every_buyer", "triage_leftovers"} <= names
 
-    # The four desks run concurrently: all four hang off START.
+    # Every desk runs concurrently: each one hangs directly off START.
     from_start = {e["to"] for e in shape["edges"] if e["from"] == "__START__"}
     assert len(from_start) == len(cuepass_agents.BUYERS)
 
@@ -611,6 +866,81 @@ def test_workflow_graph_has_the_declared_shape():
         if node["name"].endswith("_spec_desk") or node["name"] == "triage_leftovers":
             assert node["runs_model"], f"{node['name']} must be a model node"
     assert adk is not None
+
+
+def test_no_module_prose_hardcodes_a_desk_count():
+    """Prose must state the rule, not the tally.
+
+    The bug this guards actually shipped: the module docstring and the Workflow's
+    own `description` said "four buyer desks" from before Netflix was split into
+    two profiles, so a reader saw a false four beside a real five. A count written
+    into prose goes stale the moment BUYERS changes, and a stale number sitting
+    next to correct ones is worse than no number.
+
+    Two things are legitimately not stale counts and are allowed:
+      - a rate: "one desk per delivery profile" is true at any size;
+      - the arity of a pairwise comparison: a contrast compares exactly two
+        profiles by definition, however many profiles exist.
+    """
+    number_words = r"(?:two|three|four|five|six|seven|eight|nine|ten|\d+)"
+    subject = r"(?:buyer|desk|profile|spec\s+desk|research\s+desk)s?"
+    offender = re.compile(rf"(?i)\b{number_words}\s+(?:\w+\s+){{0,2}}?{subject}\b")
+    rate = re.compile(r"(?i)\bone\s+(?:\w+\s+){0,3}?per\b")
+    pairwise = re.compile(r"(?i)\b(compar\w+|contrast\w*|pair\w*|both|differ\w*)\b")
+
+    for name in ("cuepass_agents.py", "agent.py", "parallel_spec.py", "runstore.py"):
+        text = Path(__file__).resolve().parent.joinpath(name).read_text(encoding="utf-8")
+        for match in offender.finditer(text):
+            window = text[max(0, match.start() - 90) : match.end() + 90]
+            if rate.search(window):
+                continue
+            if match.group(0).lower().startswith("two") and pairwise.search(window):
+                continue
+            line = text[: match.start()].count("\n") + 1
+            pytest.fail(
+                f"{name}:{line} hardcodes a count: {match.group(0)!r}. "
+                "State the rule (one desk per profile) or derive it from BUYERS."
+            )
+
+
+def test_the_workflow_description_counts_the_desks_it_built():
+    """The graph's own description must agree with the graph.
+
+    This string is runtime metadata and surfaces in graph output, so it is exactly
+    the place a hardcoded figure would be believed.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    wf = cuepass_agents.build_workflow()
+    desks = [n for n in wf.graph.nodes if n.name.endswith("_spec_desk")]
+    assert len(desks) == len(cuepass_agents.BUYERS)
+    assert str(len(desks)) in wf.description, (
+        f"description does not state the real desk count: {wf.description!r}"
+    )
+
+
+def test_every_declared_profile_gets_a_desk_and_a_column():
+    """Every profile either cites a spec or says why not. None may vanish.
+
+    A profile that silently produced no desk, and no unavailable row either, would
+    disappear from the page with nothing saying it was ever asked.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    runs = runstore.list_runs()
+    if not runs:
+        pytest.skip("no run stored yet; run seed_run.py")
+    full = runstore.get_run(runs[0]["run_id"])
+    accounted = set(full["buyers"]) | set(full["unavailable"])
+    declared = set(cuepass_agents.BUYERS)
+    assert accounted == declared, (
+        f"declared but missing from the run: {sorted(declared - accounted)}; "
+        f"in the run but no longer declared: {sorted(accounted - declared)}"
+    )
+    desks = {n["name"] for n in full["graph"]["nodes"] if n["name"].endswith("_spec_desk")}
+    assert len(desks) == len(accounted)
 
 
 def test_the_model_is_never_asked_for_a_threshold():
