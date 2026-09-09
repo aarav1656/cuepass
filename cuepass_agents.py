@@ -1,28 +1,34 @@
 """The Cuepass delivery desk, as a google-adk Workflow.
 
-Topology (this is the real graph, not a drawing of one):
+Topology (this is the real graph, not a drawing of one). One spec desk per entry
+in `BUYERS`, so the fan-out is however many profiles that tuple holds:
 
     START
-      |-- netflix_spec_desk  --+
-      |-- amazon_spec_desk   --+
-      |-- bbc_spec_desk      --+--> spec_desk_join
-      |-- fcc_spec_desk      --+          |
-                                          v
+      |-- <profile>_spec_desk  --+
+      |-- <profile>_spec_desk  --+--> spec_desk_join
+      |-- ...                  --+          |
+                                            v
                                   bind_cited_specs      (deterministic)
-                                          v
+                                            v
                                   measure_every_buyer   (deterministic)
-                                          v
+                                            v
                                   repair_every_buyer    (deterministic)
-                                          v
+                                            v
                                   remeasure_every_buyer (deterministic)
-                                          v
+                                            v
                                   collect_leftovers     (deterministic)
-                                          v
+                                            v
                                   triage_leftovers      (model)
+
+`graph_shape()` reads the built graph, so the desk names and the count printed
+anywhere in the product come from `BUYERS` rather than from this comment. Nothing
+in this file states how many desks there are: a count written in prose goes stale
+the moment a profile is added, and a stale count sitting next to correct numbers
+is worse than no count.
 
 Who does what, and why it could not be done by the node before it:
 
-`*_spec_desk` (four LlmAgents, run concurrently by the graph)
+`*_spec_desk` (one LlmAgent per delivery profile, run concurrently by the graph)
     Each one researches one buyer's published caption spec with two Parallel
     tools. The judgement it makes is which of the candidate pages Search
     returned is the buyer's OWN published specification rather than a blog
@@ -49,8 +55,8 @@ Who does what, and why it could not be done by the node before it:
 
 ADK 2.8 note: SequentialAgent, ParallelAgent and LoopAgent all carry
 `@deprecated('... in favor of Workflow ...')` in this version, so the graph is
-built with `google.adk.workflow.Workflow` edges. The fan-out across four buyers
-is a tuple in the edge list and a `JoinNode` waits for all four.
+built with `google.adk.workflow.Workflow` edges. The fan-out across the profiles
+is a tuple in the edge list and a `JoinNode` waits for every branch.
 """
 
 from __future__ import annotations
@@ -133,7 +139,7 @@ class EditorialQueue(BaseModel):
     actions: list[EditorialAction] = Field(default_factory=list)
 
 
-# --- the four buyer desks -------------------------------------------------
+# --- one research desk per delivery profile ------------------------------
 
 _DESK_INSTRUCTION = """You are the delivery desk for {label}.
 
@@ -479,9 +485,9 @@ def triage_agent():
 def build_workflow():
     """The Cuepass delivery desk graph.
 
-    Fan-out across the four buyer desks is a tuple in the edge list. The
-    JoinNode holds the deterministic half back until every desk has finished,
-    so the measurement always runs against the full set of specs cited this run.
+    Fan-out is a tuple in the edge list, one branch per entry in BUYERS. The
+    JoinNode holds the deterministic half back until every desk has finished, so
+    the measurement always runs against the full set of specs cited this run.
     """
     from google.adk.workflow import START, FunctionNode, JoinNode, Workflow
 
@@ -497,10 +503,13 @@ def build_workflow():
 
     return Workflow(
         name="cuepass_delivery_desk",
+        # Counted off the desks actually built, never written down. This string is
+        # runtime metadata that surfaces in graph output, so a hardcoded number
+        # here would be a false figure printed beside true ones.
         description=(
-            "Four buyer desks research their own published caption spec with "
-            "Parallel Search and Extract; the same subtitle file is then measured, "
-            "repaired and re-measured against every cited spec."
+            f"{len(desks)} delivery-profile desks research their own published "
+            "caption spec with Parallel Search and Extract; the same subtitle file "
+            "is then measured, repaired and re-measured against every cited spec."
         ),
         edges=[
             (START, desks, join),

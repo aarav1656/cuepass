@@ -544,10 +544,10 @@ _NETFLIX_MIN_DURATION_FALLBACK = {
     # that phrasing implies.
     #
     # Only the minimum duration is pinned, and deliberately only that. Reading
-    # speed is never pinned for either Netflix profile: the whole point of the
-    # two profiles is that each publishes its own figure, so a pinned reading
-    # speed would let one profile borrow the other's number and turn the
-    # comparison into an artefact of this file.
+    # speed is never pinned for any Netflix profile: the point of running a desk
+    # per profile is that each publishes its own figure, so a pinned reading speed
+    # would let one profile borrow another's number and turn the comparison into
+    # an artefact of this repository rather than of the published pages.
     "min_duration_s": {
         "value": 0.8,
         "clause": (

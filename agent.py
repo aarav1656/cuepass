@@ -46,10 +46,21 @@ def _jsonable(value: Any) -> Any:
     """Compact anything an ADK event carries into something JSON can hold."""
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
+    # The trace is provenance a reader inspects, so where it is shortened it has
+    # to say so. Dropping items silently would make a truncated tool result
+    # indistinguishable from a short one.
     if isinstance(value, dict):
-        return {k: _jsonable(v) for k, v in list(value.items())[:12]}
+        items = list(value.items())
+        out = {k: _jsonable(v) for k, v in items[:12]}
+        if len(items) > 12:
+            out["..."] = f"{len(items) - 12} more keys"
+        return out
     if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in list(value)[:8]]
+        items = list(value)
+        out = [_jsonable(v) for v in items[:8]]
+        if len(items) > 8:
+            out.append(f"... {len(items) - 8} more items")
+        return out
     if hasattr(value, "model_dump"):
         try:
             return _jsonable(value.model_dump())
@@ -216,7 +227,13 @@ def _contrasts(buyers: dict[str, dict]) -> list[dict]:
                     "looser_scope": buyers[looser]["spec"].get("scope", ""),
                     # The number that only exists because the specs were fetched.
                     "cues_legal_under_looser_only": len(only_stricter),
-                    "cue_indices": sorted(only_stricter)[:200],
+                    # Every index, uncapped, and it must stay that way. This was
+                    # sliced to 200 while the count above stayed exact, so a wider
+                    # reading-speed gap would have published a true count next to
+                    # a short list, and a consumer marking rows from the list would
+                    # have highlighted 200 of them while the headline said more.
+                    # A count and the evidence for it must not be able to disagree.
+                    "cue_indices": sorted(only_stricter),
                 }
             )
     return out
@@ -231,7 +248,7 @@ def _pick_film(identifier: str | None) -> dict:
 
 
 def run_agent(identifier: str | None = None) -> dict:
-    """One full pass: research four buyers, measure, repair, prove, triage.
+    """One full pass: research every delivery profile, measure, repair, prove, triage.
 
     Returns the stored run record. Raises rather than degrading: without
     Parallel there is no cited spec to measure against, and without Gemini

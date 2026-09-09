@@ -68,11 +68,14 @@ Agent Development Kit (ADK) instead of external wrapper libraries."
 
 ## Our product performs that verb
 
-The run is a `google.adk.workflow.Workflow` graph. Four buyer desks
-(`LlmAgent`) research their own buyer's published spec concurrently with
-Parallel Search and Extract; a `JoinNode` holds until all four report; then four
-`FunctionNode`s that never touch a model bind the cited specs, measure, repair
-and re-measure; then one `LlmAgent` triages what is left into editorial actions.
+The run is a `google.adk.workflow.Workflow` graph. One research desk per delivery
+profile, each an `LlmAgent`, researches that profile's own published spec
+concurrently with Parallel Search and Extract. A `JoinNode` holds until every desk
+reports. Then a chain of `FunctionNode`s that never touch a model binds the cited
+specs, measures, repairs and re-measures. Then one `LlmAgent` triages what is left
+into editorial actions. Counts come from `graph_shape()` reading the built graph,
+never from prose.
+
 Deterministic where it must be, model only where a decision is genuinely a
 judgement. The order is fixed by the graph, not by a prompt.
 
@@ -105,7 +108,7 @@ deliberately not doing. **Monitor**: recommended against, caption style guides
 do not change inside a judging window, so a Monitor call would be a README
 ornament. Not shipped. **Parallel Task API**: genuinely the right tool for typed
 output with per-field `basis` citations, but its processors run 15s to 10min per
-run and four buyers means four runs, which would make the live demo a wait. The
+run, and one run per delivery profile, which would make the live demo a wait. The
 Search plus Extract chain gets the same evidence (URL, page text, verbatim
 clause) inside a few seconds, so that is what ships. Recorded here so the choice
 reads as a decision rather than an omission.

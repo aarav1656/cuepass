@@ -53,7 +53,7 @@ if record is None:
     raise SystemExit("no stored run: nothing to check, and an empty check is not a pass")
 run = app.ui_run(record)
 buyer = run["default_buyer"]
-contrast = run["contrast"]
+contrast = (run["contrasts"] or [None])[0]
 looser = contrast["looser"] if contrast else ""
 specs = {k: v["spec"] for k, v in run["buyers"].items()}
 print(json.dumps({
@@ -61,10 +61,11 @@ print(json.dumps({
     "buyer": buyer,
     "rows": run["buyers"][buyer]["rows"],
     "violations_after": run["buyers"][buyer]["totals"]["violations_after"],
-    "contrast": contrast,
+    "contrasts": run["contrasts"],
     "contrast_desk_is_open": bool(contrast) and contrast["stricter"] == buyer,
     "looser_rows": run["buyers"][looser]["rows"] if looser else [],
     "specs": specs,
+    "cue_count": run["cue_count"],
     "graph_nodes": [n["name"] for n in (run["graph"].get("nodes") or [])],
     "desk_total": len(run["buyers"]) + len(run["unavailable"]),
     "script": app.HTML,
@@ -178,8 +179,11 @@ if (moved.length) {
     cell.includes('>' + r.value_after.toFixed(2) + '<')
     || cell.includes('>' + r.value_after.toFixed(0) + '<'),
     'cue ' + r.index + ' after=' + r.value_after + ' before=' + r.value);
+  // Matched against the marker the template emits, not against the bare word:
+  // a cue's own dialogue can contain "was", so grepping the whole row made this
+  // pass for the wrong reason and survive the value being dropped.
   check('a row the retime moved keeps the original beside it',
-    cell.includes('was '), 'cue ' + r.index);
+    /&middot; was \d/.test(cell), 'cue ' + r.index + ': ' + cell.slice(-120));
 }
 
 // 6. Clicking a still-red cue yields a pasteable note. A cleared cue yields none.
@@ -218,7 +222,7 @@ check('rendered still-red rows carry a copy handle',
 // exactly what the page says: cues this profile raises on reading speed that the
 // other published profile's own threshold would let through. Anything else and
 // the headline figure is decoration.
-const c = payload.contrast;
+const c = (payload.contrasts || [])[0];
 if (c) {
   const gap = api.rowsForMode(rows, 'contrast');
   check('the contrast desk is the one that opens', payload.contrast_desk_is_open);
@@ -253,6 +257,59 @@ if (c) {
   // cue also breaks a rule the looser profile does publish.
   check('only the stricter profile marks the gap',
     payload.looser_rows.filter(r => r.in_contrast).length === 0);
+
+  // Every differing pair has to reach the page. This run produces one, so the
+  // multi-pair case is exercised on synthetic input: three profiles at three
+  // reading speeds produce three pairs, and rendering only the first would drop
+  // measured evidence while looking complete. Synthetic here is legitimate,
+  // nothing invented reaches a screen; it only proves the renderer loops.
+  const contrastFn = new Function('esc', 'num',
+    slice('function renderContrast', 'function renderRail', 'renderContrast')
+    + '\nreturn renderContrast;')(esc, function (n) { return String(n); });
+  const threePairs = [
+    { count: 11, stricter: 'a', looser: 'b', stricter_platform: 'A', looser_platform: 'B',
+      stricter_max_cps: 15, looser_max_cps: 17, stricter_url: '', looser_url: '' },
+    { count: 22, stricter: 'a', looser: 'c', stricter_platform: 'A', looser_platform: 'C',
+      stricter_max_cps: 15, looser_max_cps: 20, stricter_url: '', looser_url: '' },
+    { count: 33, stricter: 'b', looser: 'c', stricter_platform: 'B', looser_platform: 'C',
+      stricter_max_cps: 17, looser_max_cps: 20, stricter_url: '', looser_url: '' }
+  ];
+  const many = contrastFn(threePairs);
+  check('every differing pair is rendered, not just the first',
+    ['11', '22', '33'].every(n => many.indexOf('>' + n + '<') > -1),
+    'missing from output: ' + ['11', '22', '33'].filter(n => many.indexOf('>' + n + '<') < 0));
+  check('each pair carries its own click target',
+    ['data-contrast="0"', 'data-contrast="1"', 'data-contrast="2"']
+      .every(a => many.indexOf(a) > -1));
+  check('a run with no differing pair renders nothing', contrastFn([]) === ''
+    && contrastFn(null) === '');
+
+  // The headline count and the cue list behind it are separate fields, so they
+  // can drift. On the stored run they must agree, otherwise the block offers to
+  // show more cues than it holds.
+  payload.contrasts.forEach(function(row, i) {
+    check('pair ' + i + ': the cue list is as long as the count it prints',
+      row.evidence_complete === true
+      && row.cue_indices.length === row.count,
+      row.cue_indices.length + ' listed vs ' + row.count + ' printed');
+    const over = row.cue_indices.filter(n => n < 1 || n > payload.cue_count);
+    check('pair ' + i + ': every listed cue index is inside the track',
+      over.length === 0, 'out of range: ' + over.slice(0, 6).join(', '));
+  });
+
+  // And if a run ever does hand over a short list, the offer has to shrink to
+  // match it and say so, rather than promising cues it cannot show.
+  const short = contrastFn([{
+    count: 260, cue_indices: [1, 2, 3], evidence_complete: false,
+    stricter: 'a', looser: 'b', stricter_platform: 'A', looser_platform: 'B',
+    stricter_max_cps: 12, looser_max_cps: 20, stricter_url: '', looser_url: ''
+  }]);
+  check('a short cue list shrinks the offer instead of overpromising',
+    short.indexOf('Show me the 3 cues') > -1 && short.indexOf('Show me the 260 cues') < 0);
+  check('a short cue list says so on the block', /c-partial/.test(short)
+    && short.indexOf('recorded 3 of them') > -1);
+  check('a short cue list still shows the measured count as the headline',
+    short.indexOf('>260<') > -1);
 
   // The contrast is a scope difference between two of one publisher's guides.
   // Framing it as a contradiction would be a claim the data does not support.
@@ -303,7 +360,7 @@ Object.keys(payload.specs).forEach(function(key) {
 // words. Those change with the run: the page said "four desks" for a week after
 // a fifth was added, which is a false claim printed next to true numbers. Counts
 // on screen have to be read off the record.
-const COUNT_WORDS = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(buyer\s+|spec\s+|delivery\s+)?(desks?|profiles?|rules?|buyers?|pages?)\b/gi;
+const COUNT_WORDS = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:[a-z]+\s+){0,2}?(desks?|profiles?|rules?|buyers?|pages?)\b/gi;
 // Comments are not user-facing, and one of them has to be able to name the bug
 // it is preventing, so they are stripped before the copy is scanned.
 const script = slice('<script>\nconst filmSel', '</script>', 'the inline script')
