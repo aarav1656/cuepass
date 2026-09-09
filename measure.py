@@ -313,3 +313,63 @@ def _render_srt(cues: list[dict]) -> str:
             + "\n".join(c["lines"])
         )
     return "\n\n".join(parts) + "\n"
+
+
+# --- why a leftover cue is still red -------------------------------------
+
+REASON_NO_FREE_SPACE = "no free space"
+REASON_LINE_TOO_LONG = "line too long"
+REASON_BOXED_IN = "min duration boxed in"
+
+
+def explain_leftovers(
+    text: str,
+    max_cps: float = DEFAULT_MAX_CPS,
+    min_duration_s: float = DEFAULT_MIN_CUE_SECONDS,
+    max_line_chars: int = DEFAULT_MAX_LINE_CHARS,
+    max_lines: int = DEFAULT_MAX_LINES,
+) -> dict[int, str]:
+    """Say why each cue that repair could not clear is still failing.
+
+    Runs the same sort/ceiling arithmetic as remediate_subtitles, so the reason
+    is derived from the repair that actually ran, not from a second guess.
+
+    Keys are 1-based cue indices in the ORIGINAL parse order, matching the
+    cue_index carried on findings from the source file, so a reason drops
+    straight onto its row on the sheet.
+    """
+    cues = parse_srt(text)
+    for n, c in enumerate(cues, start=1):
+        c["_orig_index"] = n
+    cues.sort(key=lambda c: (c["start"], c["end"]))
+    reasons: dict[int, str] = {}
+
+    for i, c in enumerate(cues):
+        idx = c["_orig_index"]
+        chars = len(c["text"].strip())
+        needed = max(chars / max_cps if max_cps else 0.0, min_duration_s)
+        needed = math.ceil(needed * 1000) / 1000
+
+        ceiling = (
+            cues[i + 1]["start"] - 0.042 if i + 1 < len(cues) else c["start"] + needed
+        )
+        reachable = max(min(c["start"] + needed, ceiling), c["end"]) - c["start"]
+
+        # Text problems retiming can never touch come first: no amount of
+        # extra screen time shortens a 60-character line.
+        if max((len(ln) for ln in c["lines"]), default=0) > max_line_chars or (
+            len(c["lines"]) > max_lines
+        ):
+            reasons[idx] = REASON_LINE_TOO_LONG
+            continue
+
+        if reachable >= needed:
+            continue  # repair cleared this cue
+
+        # Still short after extending as far as the next cue allows.
+        if reachable < min_duration_s:
+            reasons[idx] = REASON_BOXED_IN
+        else:
+            reasons[idx] = REASON_NO_FREE_SPACE
+
+    return reasons

@@ -361,3 +361,48 @@ class TestCitableUrl:
     def test_rejects_empty_and_non_http(self):
         assert not parallel_spec._is_citable_url("")
         assert not parallel_spec._is_citable_url("ftp://example.com/spec")
+
+
+class TestLeftoverReasons:
+    """75 cues still red looks like a broken tool unless each one says why.
+    Every cue the retime could not clear must carry a non-empty reason."""
+
+    def _still_failing(self, srt):
+        repaired, _ = m.remediate_subtitles(srt)
+        return m.measure_subtitles(repaired).findings_as_dicts()
+
+    def test_no_leftover_cue_has_an_empty_reason(self):
+        # cue 1 wants ~2.4s of screen time and cue 2 starts 0.4s later;
+        # cue 3 is a single line far past the 42-char limit.
+        srt = (
+            "1\n00:00:01,000 --> 00:00:01,200\nForty one characters of dialogue here ok\n\n"
+            "2\n00:00:01,400 --> 00:00:03,000\nShort\n\n"
+            "3\n00:00:10,000 --> 00:00:20,000\n"
+            "A single line of dialogue well past the forty two character limit\n"
+        )
+        reasons = m.explain_leftovers(srt)
+        leftover = self._still_failing(srt)
+        assert leftover, "expected cues that repair could not clear"
+        for f in leftover:
+            r = reasons.get(f["cue_index"], "")
+            assert r.strip(), f"cue {f['cue_index']} left red with no reason"
+
+    def test_reason_names_the_blocking_neighbour(self):
+        srt = (
+            "1\n00:00:01,000 --> 00:00:01,200\nForty one characters of dialogue here ok\n\n"
+            "2\n00:00:01,400 --> 00:00:03,000\nShort\n"
+        )
+        assert m.explain_leftovers(srt)[1] in (
+            m.REASON_NO_FREE_SPACE, m.REASON_BOXED_IN,
+        )
+
+    def test_long_line_is_not_blamed_on_timing(self):
+        srt = (
+            "1\n00:00:10,000 --> 00:00:20,000\n"
+            "A single line of dialogue well past the forty two character limit\n"
+        )
+        assert m.explain_leftovers(srt)[1] == m.REASON_LINE_TOO_LONG
+
+    def test_cue_repair_can_clear_gets_no_reason(self):
+        srt = "1\n00:00:01,000 --> 00:00:01,200\nShort\n"
+        assert 1 not in m.explain_leftovers(srt)

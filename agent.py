@@ -228,6 +228,17 @@ def run_agent(
     repaired_path.write_text(srt_repaired, encoding="utf-8")
     logger.info("Repaired SRT written to %s (%d cues changed)", repaired_path, n_changed)
 
+    # Step 5b: for every cue the retime could not clear, say why. Same sort and
+    # same ceiling arithmetic as the repair, so the reason describes the repair
+    # that actually ran. Nothing here is model-generated.
+    leftover_reasons = measure_mod.explain_leftovers(
+        srt_text,
+        max_cps=spec["max_cps"],
+        min_duration_s=spec["min_duration_s"],
+        max_line_chars=spec["max_line_chars"],
+        max_lines=spec["max_lines"],
+    )
+
     # Step 6: re-measure and verify improvement
     report_after = measure_mod.measure_subtitles(srt_repaired, spec=spec)
     logger.info(
@@ -262,6 +273,7 @@ def run_agent(
             "findings": report_after.findings_as_dicts(),
         },
         "classification": {str(k): v for k, v in classification.items()},
+        "leftover_reasons": {str(k): v for k, v in leftover_reasons.items()},
         "auto_fixable_count": auto_count,
         "needs_review_count": review_count,
         "cues_changed": n_changed,

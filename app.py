@@ -443,6 +443,16 @@ HTML = """<!DOCTYPE html>
       font-size: 9px;
     }
 
+    .cue-why {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-top: 4px;
+    }
+    .cue-why::before { content: 'CANNOT RETIME: '; color: var(--text-3); }
+
     .no-violations {
       padding: 40px 24px;
       font-family: var(--mono);
@@ -585,6 +595,7 @@ runBtn.addEventListener('click', async () => {
 function renderSheet(d) {
   const b = d.before, a = d.after, s = d.spec;
   const cls = d.classification || {};
+  const why = d.leftover_reasons || {};
 
   // spec citation: header of the sheet
   var badgeCls = s.is_cached ? 'cached' : 'live';
@@ -667,11 +678,14 @@ function renderSheet(d) {
                    : f.check.toUpperCase().slice(0, 4);
       var idx = String(f.cue_index);
       while (idx.length < 4) idx = '0' + idx;
+      var reason = why[String(f.cue_index)] || '';
+      var reasonHtml = reason
+        ? '<div class="cue-why">' + esc(reason) + '</div>' : '';
 
       return '<div class="cue-row ' + rowCls + '">'
         + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
         + '<div class="cue-tc">' + esc(f.timecode || '') + '</div>'
-        + '<div class="cue-text">' + esc(f.text_preview || '') + '</div>'
+        + '<div class="cue-text">' + esc(f.text_preview || '') + reasonHtml + '</div>'
         + '<div class="cue-val ' + valCls + '">' + val
         + '<small>' + esc(f.unit) + '</small></div>'
         + '<div class="cue-check">' + checkLbl
