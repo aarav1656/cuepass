@@ -75,9 +75,9 @@ So the interesting question is not "does this file pass Netflix". It is "how far
 
 ### What it does
 
-Cuepass runs one research desk per delivery profile. Each desk finds and opens its own profile's published page, and the thresholds are read out of that page's text. The same subtitle file is then measured against every cited spec, retimed, and measured a second time.
+Cuepass runs one research desk per delivery profile. Parallel Search discovers the candidate pages for that profile. Parallel Extract opens them. Thresholds come from the extracted page text via `read_page_thresholds` in Python, not from LLM authorship. Without `PARALLEL_API_KEY`, Search never runs, `ParallelUnavailableError` is raised, and there is no product: no key, no run, no thresholds to measure against.
 
-Run it on The Iron Mask (1929), 516 cues, the ASR subtitle track published on archive.org. The two columns stay apart the whole way down:
+The same subtitle file is then measured against every cited spec, retimed, and measured a second time. Run it on The Iron Mask (1929), 516 cues, the ASR subtitle track published on archive.org. The two columns stay apart the whole way down:
 
 | Stage | Left: article `217350977` | Right: article `219375728` |
 |---|---|---|
