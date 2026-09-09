@@ -2,7 +2,7 @@
 
 Spotting-sheet UI: near-black Verge 2024 system, Anton display,
 Space Mono labels, mint #3cffd0 for repaired state and primary action only.
-No Inter. No off-white blog. No pill buttons. No emoji.
+No Inter. No sidebar. No app chrome bar. The cue list is the product.
 """
 
 from __future__ import annotations
@@ -59,20 +59,18 @@ HTML = """<!DOCTYPE html>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --canvas:    #131313;
-      --surface:   #1c1c1c;
-      --surface-2: #2d2d2d;
-      --border:    #252525;
-      --border-hi: #383838;
-      --text:      #ffffff;
-      --text-2:    #949494;
-      --text-3:    #555555;
-      --mint:      #3cffd0;
-      --uv:        #5200ff;
-      --red:       #ff3b3b;
-      --display:   'Anton', Impact, 'Helvetica Neue', sans-serif;
-      --mono:      'Space Mono', ui-monospace, 'JetBrains Mono', monospace;
-      --body:      -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --canvas:  #131313;
+      --surface: #191919;
+      --border:  #242424;
+      --border-hi: #363636;
+      --text:    #ffffff;
+      --text-2:  #9a9a9a;
+      --text-3:  #5c5c5c;
+      --mint:    #3cffd0;
+      --red:     #ff3b3b;
+      --display: 'Anton', Impact, 'Helvetica Neue', sans-serif;
+      --mono:    'Space Mono', ui-monospace, 'JetBrains Mono', monospace;
+      --read:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     }
 
     html, body { height: 100%; }
@@ -80,133 +78,121 @@ HTML = """<!DOCTYPE html>
     body {
       background: var(--canvas);
       color: var(--text);
-      font-family: var(--body);
-      font-size: 14px;
+      font-family: var(--read);
+      font-size: 15px;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
 
-    .layout {
-      display: grid;
-      grid-template-rows: 48px 1fr;
-      grid-template-columns: 252px 1fr;
-      grid-template-areas: "hd hd" "sb mn";
-      min-height: 100vh;
+    ::selection { background: var(--mint); color: #000; }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: clamp(28px, 5vw, 60px) clamp(20px, 5vw, 60px) 120px;
     }
 
-    /* ---- header ---- */
-    header {
-      grid-area: hd;
+    /* ---- masthead: wordmark + one run line. no sidebar, no chrome bar. ---- */
+    .masthead {
       border-bottom: 1px solid var(--border-hi);
-      padding: 0 24px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
+      padding-bottom: 22px;
     }
 
+    .brand {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+      line-height: 0.9;
+    }
     .wordmark {
       font-family: var(--display);
-      font-size: 22px;
-      letter-spacing: 2px;
-      line-height: 1;
+      font-weight: 400;
+      font-size: clamp(64px, 7.5vw, 70px);
+      letter-spacing: -0.02em;
+      line-height: 0.86;
       color: var(--text);
     }
-
-    .wordmark-tag {
+    .brand-unit {
       font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      color: var(--text-3);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: var(--mint);
+      padding-bottom: 10px;
     }
 
-    /* ---- sidebar ---- */
-    aside {
-      grid-area: sb;
-      border-right: 1px solid var(--border);
-      padding: 20px 16px;
+    .runbar {
       display: flex;
-      flex-direction: column;
-      gap: 16px;
-      overflow-y: auto;
+      flex-wrap: wrap;
+      align-items: stretch;
+      gap: 10px;
+      margin-top: 26px;
     }
-
-    .field-label {
-      font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      color: var(--text-3);
-      display: block;
-      margin-bottom: 6px;
-    }
-
-    select, input[type="text"] {
-      width: 100%;
+    .runbar select, .runbar input[type="text"] {
       background: var(--surface);
       border: 1px solid var(--border-hi);
       border-radius: 2px;
-      padding: 8px 10px;
+      padding: 0 12px;
+      height: 40px;
       color: var(--text);
-      font-family: var(--body);
+      font-family: var(--mono);
       font-size: 13px;
+      letter-spacing: 0.2px;
       -webkit-appearance: none;
+      appearance: none;
     }
-    select:focus, input:focus {
-      outline: 1px solid var(--mint);
+    .runbar select { min-width: 220px; cursor: pointer; }
+    .runbar select:hover, .runbar input:hover { border-color: #4a4a4a; }
+    .runbar select:focus, .runbar input:focus {
+      outline: none;
       border-color: var(--mint);
     }
-    select option { background: var(--surface); }
+    .runbar select option { background: #1c1c1c; color: var(--text); }
+    .runbar .ident { width: 168px; }
+    .runbar .or {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      display: flex;
+      align-items: center;
+      padding: 0 2px;
+    }
 
+    /* the single run control, mint fill, sharp corners, not a pill */
     .run-btn {
-      width: 100%;
       background: var(--mint);
       color: #000;
       border: 0;
       border-radius: 2px;
-      padding: 10px 16px;
+      height: 40px;
+      padding: 0 22px;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
-      letter-spacing: 1.8px;
+      letter-spacing: 2px;
       text-transform: uppercase;
       cursor: pointer;
-      transition: opacity .15s;
+      transition: transform .12s ease, opacity .12s ease;
+      white-space: nowrap;
     }
-    .run-btn:hover:not(:disabled) { opacity: 0.82; }
-
-    .take-track {
-      display: inline-block;
-      margin-top: 14px;
-      background: var(--mint);
-      color: #000;
-      border-radius: 2px;
-      padding: 9px 18px;
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      text-decoration: none;
-    }
-    .take-track:hover { opacity: 0.82; }
-    .run-btn:disabled {
-      background: var(--surface-2);
-      color: var(--text-3);
-      cursor: default;
-    }
+    .run-btn:hover:not(:disabled) { transform: translateY(-1px); }
+    .run-btn:active:not(:disabled) { transform: translateY(0); }
+    .run-btn:disabled { background: #2a2a2a; color: var(--text-3); cursor: default; }
 
     .status-line {
       font-family: var(--mono);
-      font-size: 11px;
-      color: var(--text-3);
+      font-size: 12px;
+      color: var(--text-2);
       letter-spacing: 0.4px;
-      min-height: 14px;
+      margin-top: 16px;
+      min-height: 16px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
-
     .spinner {
       width: 10px; height: 10px;
       border: 1px solid var(--border-hi);
@@ -218,371 +204,230 @@ HTML = """<!DOCTYPE html>
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
-    /* ---- spec citation: header of the sheet, not a footnote ---- */
-    .spec-header {
-      border-bottom: 1px solid var(--border-hi);
-      background: var(--surface);
-      padding: 14px 24px;
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      flex-wrap: wrap;
-    }
-    .spec-header .spec-platform {
-      font-family: var(--display);
-      font-size: 18px;
-      letter-spacing: 1px;
-    }
-    .spec-thresholds {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--text-2);
-      letter-spacing: 0.5px;
-    }
-    .spec-thresholds b { color: var(--text); font-weight: 700; }
-    .spec-cite {
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: 0.3px;
-      flex-basis: 100%;
-      word-break: break-all;
-    }
-    .spec-cite a { color: var(--mint); text-decoration: underline; }
-    .spec-cite a:hover { color: var(--text); }
-    .spec-cite .cite-label { color: var(--text-3); }
-
-    .spec-badge {
-      font-family: var(--mono);
-      font-size: 9px;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      padding: 2px 5px;
-      border: 1px solid var(--border-hi);
-      border-radius: 1px;
-      display: inline-block;
-      margin-bottom: 6px;
-    }
-    .spec-badge.live   { border-color: var(--mint); color: var(--mint); }
-    .spec-badge.cached { color: var(--text-3); }
-    .spec-block-unused p {
-      font-family: var(--mono);
-      font-size: 10px;
-      color: var(--text-3);
-      letter-spacing: 0.3px;
-      line-height: 1.7;
-      word-break: break-all;
-    }
-    .spec-block a { color: var(--text-3); text-decoration: none; }
-    .spec-block a:hover { color: var(--mint); }
-
-    /* ---- main ---- */
-    main { grid-area: mn; overflow-y: auto; }
-
-    /* pre-run: known films reference table */
-    .prerun { padding: 28px; }
-
-    .section-label {
-      font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      color: var(--text-3);
-      margin-bottom: 16px;
-    }
-
-    .known-tbl { width: 100%; border-collapse: collapse; }
-    .known-tbl th {
-      font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 1.6px;
-      text-transform: uppercase;
-      color: var(--text-3);
-      text-align: left;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--border-hi);
-    }
-    .known-tbl td {
-      padding: 9px 10px;
-      border-bottom: 1px solid var(--border);
-      color: var(--text-2);
-      font-size: 13px;
-      vertical-align: top;
-    }
-    .known-tbl td:first-child {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--text);
-      white-space: nowrap;
-    }
-    .known-tbl tr { cursor: pointer; }
-    .known-tbl tr:hover td { background: var(--surface); }
-
-    /* ---- headline measurement: before -> after, second measure ---- */
-    .verdict {
-      padding: 26px 24px 22px;
-      border-bottom: 1px solid var(--border-hi);
-    }
+    /* ---- verdict: the N -> M pair is the headline. Anton, huge. ---- */
+    .verdict { padding: 40px 0 8px; }
     .verdict-nums {
       display: flex;
-      align-items: center;
-      gap: 20px;
-      font-family: var(--display);
-      line-height: 0.9;
-    }
-    .v-before { font-size: 104px; color: var(--red); }
-    .v-arrow  { font-size: 56px; color: var(--text-3); }
-    .v-after  { font-size: 104px; color: var(--mint); }
-    .verdict-caption {
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: 1.6px;
-      text-transform: uppercase;
-      color: var(--text-3);
-      margin-top: 12px;
-    }
-    .verdict-caption b { color: var(--text-2); font-weight: 700; }
-
-    /* ---- summary strip ---- */
-    .summary-strip {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border-hi);
-      padding: 12px 24px;
-      display: flex;
       align-items: baseline;
-      gap: 18px;
-      flex-wrap: wrap;
-    }
-    .sum-title {
+      gap: clamp(20px, 4vw, 44px);
       font-family: var(--display);
-      font-size: 20px;
-      letter-spacing: 1px;
-      color: var(--text);
-      margin-right: 4px;
+      font-weight: 400;
+      line-height: 0.82;
     }
-    .sum-stat {
+    .v-before { font-size: clamp(96px, 17vw, 172px); color: var(--red); letter-spacing: -0.01em; }
+    .v-arrow  { font-size: clamp(40px, 7vw, 72px); color: var(--text-3); }
+    .v-after  { font-size: clamp(96px, 17vw, 172px); letter-spacing: -0.01em; }
+    .v-after.clean    { color: var(--mint); }
+    .v-after.leftover { color: var(--red); }
+    .verdict-cap {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
+      letter-spacing: 0.6px;
+      color: var(--text-2);
+      margin-top: 20px;
+      max-width: 640px;
+    }
+    .verdict-cap b { color: var(--text); font-weight: 700; }
+    .take-track {
+      display: inline-block;
+      margin-top: 14px;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
       letter-spacing: 0.5px;
+      color: var(--mint);
+      text-decoration: none;
+      border-bottom: 1px solid var(--mint);
+      padding-bottom: 2px;
+    }
+    .take-track:hover { color: var(--text); border-color: var(--text); }
+    .take-track::after { content: ' \\2193'; }
+
+    /* ---- spec citation: sheet header, real anchor, live vs cached ---- */
+    .spec-line {
+      margin-top: 40px;
+      padding: 14px 0;
+      border-top: 1px solid var(--border-hi);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.3px;
       color: var(--text-2);
     }
-    .sum-n      { color: var(--text); font-weight: 700; }
-    .sum-n.red  { color: var(--red); }
-    .sum-n.mint { color: var(--mint); }
-    .sum-sep    { color: var(--border-hi); font-family: var(--mono); font-size: 11px; }
-
-    /* ---- spotting sheet ---- */
-    .sheet-header {
-      display: grid;
-      grid-template-columns: 52px 210px 1fr 72px 80px;
-      gap: 0 12px;
-      padding: 8px 24px;
-      border-bottom: 1px solid var(--border-hi);
-      font-family: var(--mono);
+    .spec-plat { color: var(--text); font-weight: 700; letter-spacing: 0.5px; }
+    .spec-line b { color: var(--text); font-weight: 700; }
+    .spec-tag {
       font-size: 10px;
+      font-weight: 700;
       letter-spacing: 1.6px;
       text-transform: uppercase;
-      color: var(--text-3);
     }
+    .spec-tag.live   { color: var(--mint); }
+    .spec-tag.cached { color: var(--text-3); }
+    .spec-src { flex-basis: 100%; color: var(--text-3); word-break: break-all; }
+    .spec-src a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid var(--border-hi); }
+    .spec-src a:hover { color: var(--mint); border-color: var(--mint); }
 
-    /* ---- leftover filter chips ---- */
-    .chip-bar {
+    /* ---- filter row: plain mono toggles, default still-red. not chips. ---- */
+    .filter-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      padding: 14px 24px;
-      border-bottom: 1px solid var(--border-hi);
+      align-items: baseline;
+      gap: 4px 0;
+      padding: 16px 0 6px;
     }
-    .chip {
+    .flt {
+      background: none;
+      border: 0;
+      cursor: pointer;
       font-family: var(--mono);
-      font-size: 10px;
+      font-size: 11px;
       letter-spacing: 1.4px;
       text-transform: uppercase;
       color: var(--text-3);
-      background: transparent;
-      border: 1px solid var(--border-hi);
-      border-radius: 2px;
-      padding: 5px 10px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 7px;
+      padding: 4px 14px 4px 0;
+      transition: color .12s ease;
     }
-    .chip span {
-      font-weight: 700;
-      color: var(--text-2);
+    .flt:not(:last-child)::after {
+      content: '/';
+      color: var(--border-hi);
+      padding-left: 14px;
     }
-    .chip:hover { color: var(--text-2); }
-    .chip.on {
-      color: var(--bg);
-      background: var(--text);
-      border-color: var(--text);
+    .flt:hover { color: var(--text-2); }
+    .flt .n { color: var(--text-2); font-weight: 700; margin-left: 6px; }
+    .flt.on { color: var(--text); }
+    .flt.on .n { color: var(--mint); }
+
+    /* ---- spotting sheet ---- */
+    .sheet-head {
+      display: grid;
+      grid-template-columns: 58px 188px 1fr 138px;
+      gap: 0 20px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-hi);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: var(--text-3);
     }
-    .chip.on span { color: var(--bg); }
+    .sheet-head .r { text-align: right; }
 
     .cue-row {
       display: grid;
-      grid-template-columns: 52px 210px 1fr 72px 80px;
-      gap: 0 12px;
-      padding: 9px 24px;
+      grid-template-columns: 58px 188px 1fr 138px;
+      gap: 0 20px;
+      padding: 16px 0;
       border-bottom: 1px solid var(--border);
       align-items: start;
     }
-    .cue-row.illegal  { background: rgba(255,59,59,0.04); }
-    .cue-row.repaired { background: rgba(60,255,208,0.04); }
+    .cue-row.copyable { cursor: pointer; }
+    .cue-row.copyable:hover { background: rgba(255,255,255,0.02); }
+    .cue-row.copied  { background: rgba(60,255,208,0.06); }
 
-    .cue-idx {
+    .cue-num {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-3);
       display: flex;
       align-items: center;
-      gap: 5px;
-      padding-top: 2px;
+      gap: 8px;
+      padding-top: 4px;
     }
-    .dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      background: var(--red);
-    }
-    .dot.ok       { background: var(--text-3); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--red); }
     .dot.repaired { background: var(--mint); }
 
     .cue-tc {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-2);
       letter-spacing: -0.2px;
-      padding-top: 2px;
-      white-space: nowrap;
+      padding-top: 4px;
+      line-height: 1.55;
     }
+    .cue-tc .out { color: var(--text-3); }
+    .cue-tc .out.repaired { color: var(--mint); }
 
+    .cue-body { min-width: 0; }
     .cue-text {
-      font-family: Georgia, 'Times New Roman', serif;
-      font-size: 14px;
-      line-height: 1.45;
+      font-family: var(--read);
+      font-size: 18px;
+      line-height: 1.42;
       color: var(--text);
     }
-
-    .cue-val {
-      font-family: var(--mono);
-      font-size: 12px;
-      font-weight: 700;
-      text-align: right;
-    }
-    .cue-val.red   { color: var(--red); }
-    .cue-val.mint  { color: var(--mint); }
-    .cue-val.muted { color: var(--text-2); }
-    .cue-val small {
-      display: block;
-      font-weight: 400;
-      font-size: 9px;
-      color: var(--text-3);
-      letter-spacing: 0.5px;
-    }
-
-    .cue-check {
-      font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 0.8px;
-      text-transform: uppercase;
-      color: var(--text-3);
-    }
-    .cue-check span {
-      display: block;
-      color: var(--text-3);
-      font-size: 9px;
-    }
-
     .cue-why {
       font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      margin-top: 8px;
       color: var(--red);
-      margin-top: 4px;
     }
-    .cue-why::before { content: 'CANNOT RETIME: '; color: var(--text-3); }
+    .cue-why.repaired { color: var(--mint); }
 
-    .no-violations {
-      padding: 40px 24px;
+    .cue-val {
+      text-align: right;
       font-family: var(--mono);
-      font-size: 11px;
+      padding-top: 2px;
+    }
+    .cue-val .big { font-size: 20px; font-weight: 700; line-height: 1; letter-spacing: -0.3px; }
+    .cue-val.red  .big { color: var(--red); }
+    .cue-val.mint .big { color: var(--mint); }
+    .cue-val .sub { display: block; font-size: 11px; color: var(--text-3); margin-top: 5px; letter-spacing: 0.4px; }
+
+    .empty-note {
+      padding: 40px 0;
+      font-family: var(--mono);
+      font-size: 12px;
       letter-spacing: 1px;
-      color: var(--text-3);
       text-transform: uppercase;
+      color: var(--text-3);
     }
 
     /* ---- error ---- */
-    .error-box {
-      margin: 24px;
-      border: 1px solid var(--uv);
-      border-radius: 2px;
-      padding: 14px 18px;
-    }
+    .error-box { margin-top: 32px; border: 1px solid var(--red); border-radius: 2px; padding: 16px 18px; }
     .error-label {
       font-family: var(--mono);
       font-size: 10px;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.6px;
       text-transform: uppercase;
-      color: var(--uv);
-      margin-bottom: 6px;
+      color: var(--red);
+      margin-bottom: 8px;
     }
-    .error-body {
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--text-2);
-    }
+    .error-body { font-family: var(--mono); font-size: 12px; color: var(--text-2); line-height: 1.6; }
   </style>
 </head>
 <body>
-<div class="layout">
-
-  <header>
-    <span class="wordmark">Cuepass</span>
-    <span class="wordmark-tag">subtitle QC</span>
-  </header>
-
-  <aside>
-    <div>
-      <label class="field-label" for="film-select">Film</label>
-      <select id="film-select">
-        <option value="">-- known films --</option>
-        {film_options}
-      </select>
+  <div class="page">
+    <div class="masthead">
+      <div class="brand">
+        <h1 class="wordmark">Cuepass</h1>
+        <span class="brand-unit">CPS</span>
+      </div>
+      <div class="runbar">
+        <select id="film-select" aria-label="Film">
+          <option value="">Select a track</option>
+          {film_options}
+        </select>
+        <span class="or">or</span>
+        <input type="text" id="identifier" class="ident" placeholder="identifier" aria-label="Archive identifier" />
+        <select id="platform" aria-label="Platform spec">
+          <option value="netflix">Netflix</option>
+          <option value="amazon">Amazon</option>
+          <option value="bbc">BBC</option>
+          <option value="fcc">FCC</option>
+        </select>
+        <button class="run-btn" id="run-btn" type="button">Run this track</button>
+      </div>
+      <div class="status-line" id="status-line"></div>
     </div>
-    <div>
-      <label class="field-label" for="identifier">Or identifier</label>
-      <input type="text" id="identifier" placeholder="e.g. vicki_1953" />
-    </div>
-    <div>
-      <label class="field-label" for="platform">Platform spec</label>
-      <select id="platform">
-        <option value="netflix">Netflix (TTSS)</option>
-        <option value="amazon">Amazon Prime Video</option>
-        <option value="bbc">BBC</option>
-        <option value="fcc">FCC (US broadcast)</option>
-      </select>
-    </div>
-    <button class="run-btn" id="run-btn">Run this track</button>
-    <div class="status-line" id="status-line"></div>
-  </aside>
 
-  <main id="main-area">
-    <div class="prerun">
-      <div class="section-label">Known tracks -- click to select</div>
-      <table class="known-tbl">
-        <thead>
-          <tr><th>Identifier</th><th>Title</th><th>Note</th></tr>
-        </thead>
-        <tbody id="known-body">
-          {known_rows}
-        </tbody>
-      </table>
-    </div>
-  </main>
+    <main id="main-area"></main>
+  </div>
 
-</div>
 <script>
 const filmSel  = document.getElementById('film-select');
 const identIn  = document.getElementById('identifier');
@@ -590,14 +435,6 @@ const platSel  = document.getElementById('platform');
 const runBtn   = document.getElementById('run-btn');
 const statLine = document.getElementById('status-line');
 const mainArea = document.getElementById('main-area');
-
-// click a known-film row to select it
-document.getElementById('known-body').addEventListener('click', e => {
-  const tr = e.target.closest('tr[data-id]');
-  if (!tr) return;
-  filmSel.value = tr.dataset.id;
-  identIn.value = '';
-});
 
 filmSel.addEventListener('change', () => { if (filmSel.value) identIn.value = ''; });
 identIn.addEventListener('input',  () => { if (identIn.value)  filmSel.value = ''; });
@@ -615,7 +452,7 @@ function buildRows(findings, reasons) {
   });
 }
 
-// The single place that decides what a chip shows.
+// The single place that decides what a filter shows.
 function rowsForMode(rows, mode) {
   if (mode === 'all')       return rows;
   if (mode === 'leftover')  return rows.filter(function(r) { return r.reason !== ''; });
@@ -635,6 +472,28 @@ function chipCounts(rows) {
 // Leftovers are the product. Only fall back to all when nothing is still red.
 function defaultMode(rows) {
   return rowsForMode(rows, 'leftover').length > 0 ? 'leftover' : 'all';
+}
+
+// One plain-text spotting note for a still-red cue. A cleared cue has no note:
+// this returns '' so nothing about a repaired cue is ever copyable.
+function copyLineFor(r) {
+  if (!r || r.reason === '' || !r.finding) return '';
+  var f = r.finding;
+  var idx = String(f.cue_index);
+  while (idx.length < 4) idx = '0' + idx;
+  var val = typeof f.value === 'number'
+    ? String(Number(f.value.toFixed(2))) : String(f.value);
+  var lim = typeof f.threshold === 'number'
+    ? String(Number(f.threshold.toFixed(f.check === 'min_duration' ? 3 : 0)))
+    : String(f.threshold);
+  var unit = f.unit || '';
+  var text = String(f.text_preview || '').replace(/\\s+/g, ' ').trim();
+  if (!text) return '';
+  return 'cue ' + idx
+    + '  ' + (f.timecode || '')
+    + '  ' + val + ' ' + unit + ' (limit ' + lim + ')'
+    + '  ' + r.reason
+    + '  ' + text;
 }
 
 function setStatus(html) { statLine.innerHTML = html; }
@@ -661,7 +520,7 @@ runBtn.addEventListener('click', async () => {
     const data = await resp.json();
     if (!resp.ok) {
       mainArea.innerHTML = '<div class="error-box">'
-        + '<div class="error-label">Error</div>'
+        + '<div class="error-label">Run failed</div>'
         + '<div class="error-body">' + esc(data.detail || JSON.stringify(data)) + '</div>'
         + '</div>';
     } else {
@@ -683,143 +542,139 @@ function renderSheet(d) {
   const cls = d.classification || {};
   const why = d.leftover_reasons || {};
 
-  // spec citation: header of the sheet
-  var badgeCls = s.is_cached ? 'cached' : 'live';
-  var badgeTxt = s.is_cached ? 'CACHED SPEC' : 'LIVE SPEC';
-  var specHtml = '<div class="spec-header">'
-    + '<span class="spec-badge ' + badgeCls + '">' + badgeTxt + '</span>'
-    + '<span class="spec-platform">' + esc(s.platform) + '</span>'
-    + '<span class="spec-thresholds">'
-    + 'max <b>' + s.max_cps + '</b> cps'
-    + ' / min dur <b>' + Number(s.min_duration_s).toFixed(3) + '</b> s'
-    + ' / max <b>' + s.max_line_chars + '</b> chars per line'
-    + ' / max <b>' + s.max_lines + '</b> lines</span>'
-    + '<span class="spec-cite"><span class="cite-label">Measured against: '
-    + esc(s.source_label) + ' </span>'
-    + '<a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">'
-    + esc(s.source_url) + '</a></span>'
-    + '</div>';
+  var total   = b.cue_count;
+  var vBefore = b.total_violations;
+  var vAfter  = a.total_violations;
+  var afterCls = vAfter === 0 ? 'clean' : 'leftover';
 
-  // summary strip
-  var total      = b.cue_count;
-  var overBefore = b.over_cps_count;
-  var overAfter  = a.over_cps_count;
-  var durBefore  = b.under_duration_count;
-  var durAfter   = a.under_duration_count;
-  var changed    = d.cues_changed;
-  var maxCps     = s.max_cps;
-
-  // headline: the same check, run twice. before -> after on the repaired file.
-  var fixBefore = overBefore + durBefore;
-  var fixAfter  = overAfter + durAfter;
+  // headline: the same spec check run twice, before repair and after.
   var verdict = '<div class="verdict">'
     + '<div class="verdict-nums">'
-    + '<span class="v-before">' + fixBefore + '</span>'
+    + '<span class="v-before">' + vBefore + '</span>'
     + '<span class="v-arrow">&rarr;</span>'
-    + '<span class="v-after">' + fixAfter + '</span>'
+    + '<span class="v-after ' + afterCls + '">' + vAfter + '</span>'
     + '</div>'
-    + '<div class="verdict-caption">Timing violations across <b>' + total
+    + '<p class="verdict-cap">Spec violations across <b>' + total
     + '</b> cues, before repair and after, from a second run of the same check '
-    + 'on the repaired file (<b>' + esc(d.repaired_srt_path || 'repaired .srt') + '</b>)</div>'
+    + 'on the repaired track.</p>'
     + (d.repaired_srt_name
         ? '<a class="take-track" href="/repaired/'
-          + encodeURIComponent(d.repaired_srt_name)
-          + '" download>Take repaired track</a>'
+          + encodeURIComponent(d.repaired_srt_name) + '" download>Take repaired track</a>'
         : '')
     + '</div>';
 
-  var strip = '<div class="summary-strip">'
-    + '<span class="sum-title">' + esc(d.film_title) + '</span>'
-    + '<span class="sum-stat"><span class="sum-n red">' + overBefore + '</span>'
-    + ' / <span class="sum-n">' + total + '</span>'
-    + ' over ' + maxCps + ' cps'
-    + ' &rarr; <span class="sum-n mint">' + overAfter + '</span></span>'
-    + '<span class="sum-sep">|</span>'
-    + '<span class="sum-stat"><span class="sum-n">' + durBefore + '</span>'
-    + ' under min dur &rarr; <span class="sum-n mint">' + durAfter + '</span></span>'
-    + '<span class="sum-sep">|</span>'
-    + '<span class="sum-stat"><span class="sum-n mint">' + changed + '</span> retimed</span>'
+  // spec citation, real anchor, live vs cached
+  var tagCls = s.is_cached ? 'cached' : 'live';
+  var tagTxt = s.is_cached ? 'Cached spec' : 'Live spec';
+  var spec = '<div class="spec-line">'
+    + '<span class="spec-plat">' + esc(s.platform) + '</span>'
+    + '<span class="spec-tag ' + tagCls + '">' + tagTxt + '</span>'
+    + '<span>max <b>' + s.max_cps + '</b> cps</span>'
+    + '<span>min <b>' + Number(s.min_duration_s).toFixed(3) + '</b> s</span>'
+    + '<span>max <b>' + s.max_line_chars + '</b> chars/line</span>'
+    + '<span>max <b>' + s.max_lines + '</b> lines</span>'
+    + '<span class="spec-src">Measured against '
+    + '<a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">'
+    + esc(s.source_label) + '</a></span>'
     + '</div>';
 
-  // cue rows from findings, tagged with the leftover reason from this run
   var allRows = buildRows(b.findings, why);
-  var rowsHtml = '';
+  mainArea.innerHTML = verdict + spec + '<div id="sheet"></div>';
+  var sheet = document.getElementById('sheet');
 
   if (allRows.length === 0) {
-    rowsHtml = '<div class="no-violations">No violations found</div>';
-  } else {
-    var counts = chipCounts(allRows);
-    var chipHtml = '<div class="chip-bar" id="chip-bar">'
-      + chip('leftover', 'still red',  counts.leftover)
-      + chip(REASON_NO_FREE_SPACE, 'no free space', counts.space)
-      + chip(REASON_LINE_TOO_LONG, 'line too long', counts.line)
-      + chip(REASON_BOXED_IN, 'boxed in', counts.boxed)
-      + chip('all', 'all', counts.all)
-      + '</div>';
-
-    var header = '<div class="sheet-header">'
-      + '<span>#</span><span>TIMECODE</span><span>TEXT</span>'
-      + '<span style="text-align:right">MEASURED</span><span>CHECK</span>'
-      + '</div>';
-
-    rowsHtml = chipHtml + header + '<div id="cue-rows"></div>';
+    sheet.innerHTML = '<div class="empty-note">No spec violations in this track</div>';
+    return;
   }
 
-  mainArea.innerHTML = specHtml + verdict + strip + rowsHtml;
-  if (allRows.length === 0) return;
+  var counts = chipCounts(allRows);
+  var filterRow = '<div class="filter-row" id="filter-row">'
+    + flt('leftover', 'still red', counts.leftover)
+    + flt(REASON_NO_FREE_SPACE, 'no free space', counts.space)
+    + flt(REASON_LINE_TOO_LONG, 'line too long', counts.line)
+    + flt(REASON_BOXED_IN, 'boxed in', counts.boxed)
+    + flt('all', 'all', counts.all)
+    + '</div>';
+  var head = '<div class="sheet-head">'
+    + '<span>#</span><span>Timecode</span><span>Cue</span><span class="r">Measured</span>'
+    + '</div>';
+  sheet.innerHTML = filterRow + head + '<div id="cue-rows"></div>';
 
-  // Render is local from here. No /run, no model call: chips slice allRows.
   var host = document.getElementById('cue-rows');
   function paint(mode) {
     var visible = rowsForMode(allRows, mode);
     host.innerHTML = visible.length
       ? visible.map(function(r) { return rowHtml(r, cls); }).join('')
-      : '<div class="no-violations">No cues in this category</div>';
-    var bar = document.getElementById('chip-bar');
+      : '<div class="empty-note">No cues in this category</div>';
+    var bar = document.getElementById('filter-row');
     Array.prototype.forEach.call(bar.children, function(el) {
       el.classList.toggle('on', el.dataset.mode === mode);
     });
   }
-  document.getElementById('chip-bar').addEventListener('click', function(e) {
-    var el = e.target.closest('.chip');
+  document.getElementById('filter-row').addEventListener('click', function(e) {
+    var el = e.target.closest('.flt');
     if (el) paint(el.dataset.mode);
+  });
+  // click a still-red row to lift its spotting note to the clipboard
+  host.addEventListener('click', function(e) {
+    var row = e.target.closest('.cue-row.copyable');
+    if (!row || !row.dataset.copy) return;
+    var note = row.dataset.copy;
+    var mark = function() {
+      row.classList.add('copied');
+      setTimeout(function() { row.classList.remove('copied'); }, 900);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(note).then(mark, mark);
+    } else { mark(); }
   });
   paint(defaultMode(allRows));
 }
 
-function chip(mode, label, n) {
-  return '<button class="chip" type="button" data-mode="' + esc(mode) + '">'
-    + esc(label) + '<span>' + n + '</span></button>';
+function flt(mode, label, n) {
+  return '<button class="flt" type="button" data-mode="' + esc(mode) + '">'
+    + esc(label) + '<span class="n">' + n + '</span></button>';
 }
 
 function rowHtml(r, cls) {
   var f = r.finding;
-  var classification = cls[String(f.cue_index)] || '';
-  var repaired = classification === 'auto_fixable';
-  var rowCls   = repaired ? 'repaired' : 'illegal';
-  var dotCls   = repaired ? 'repaired' : '';
-  var valCls   = repaired ? 'mint' : 'red';
+  var leftover = r.reason !== '';
+  var dotCls   = leftover ? '' : 'repaired';
+  var valCls   = leftover ? 'red' : 'mint';
   var val      = typeof f.value === 'number' ? f.value.toFixed(2) : String(f.value);
   var thresh   = typeof f.threshold === 'number'
     ? f.threshold.toFixed(f.check === 'min_duration' ? 3 : 0)
     : String(f.threshold);
-  var checkLbl = f.check === 'reading_speed' ? 'CPS'
-               : f.check === 'min_duration'  ? 'DUR'
-               : f.check === 'line_length'   ? 'LEN'
-               : f.check.toUpperCase().slice(0, 4);
+  var checkLbl = f.check === 'reading_speed' ? 'cps'
+               : f.check === 'min_duration'  ? 's'
+               : f.check === 'line_length'   ? 'ch'
+               : String(f.check).slice(0, 4);
   var idx = String(f.cue_index);
   while (idx.length < 4) idx = '0' + idx;
-  var reasonHtml = r.reason
-    ? '<div class="cue-why">' + esc(r.reason) + '</div>' : '';
 
-  return '<div class="cue-row ' + rowCls + '">'
-    + '<div class="cue-idx"><span class="dot ' + dotCls + '"></span>' + idx + '</div>'
-    + '<div class="cue-tc">' + esc(f.timecode || '') + '</div>'
-    + '<div class="cue-text">' + esc(f.text_preview || '') + reasonHtml + '</div>'
-    + '<div class="cue-val ' + valCls + '">' + val
-    + '<small>' + esc(f.unit) + '</small></div>'
-    + '<div class="cue-check">' + checkLbl
-    + '<span>lim ' + thresh + '</span></div>'
+  var tc = String(f.timecode || '').split(' --> ');
+  var tcIn  = esc(tc[0] || '');
+  var tcOut = esc(tc[1] || '');
+  var outCls = leftover ? '' : 'repaired';
+
+  var why = leftover
+    ? '<div class="cue-why">' + esc(r.reason) + '</div>'
+    : '<div class="cue-why repaired">retimed and cleared</div>';
+
+  var copyLine = copyLineFor(r);
+  var copyAttrs = copyLine ? ' data-copy="' + esc(copyLine) + '"' : '';
+
+  return '<div class="cue-row ' + (copyLine ? 'copyable' : 'cleared') + '"' + copyAttrs + '>'
+    + '<div class="cue-num"><i class="dot ' + dotCls + '"></i>' + idx + '</div>'
+    + '<div class="cue-tc">' + tcIn + '<br><span class="out ' + outCls + '">' + tcOut + '</span></div>'
+    + '<div class="cue-body">'
+      + '<div class="cue-text">' + esc(f.text_preview || '') + '</div>'
+      + why
+    + '</div>'
+    + '<div class="cue-val ' + valCls + '">'
+      + '<span class="big">' + val + '</span>'
+      + '<span class="sub">' + checkLbl + ' &middot; limit ' + thresh + '</span>'
+    + '</div>'
     + '</div>';
 }
 </script>
@@ -833,14 +688,7 @@ async def index():
         f'<option value="{f["identifier"]}">{f["title"]}</option>'
         for f in KNOWN_FILMS
     )
-    known_rows = "\n".join(
-        f'<tr data-id="{f["identifier"]}"><td>{f["identifier"]}</td>'
-        f'<td>{f["title"]}</td><td>{f["note"]}</td></tr>'
-        for f in KNOWN_FILMS
-    )
-    return (HTML
-            .replace("{film_options}", film_options)
-            .replace("{known_rows}", known_rows))
+    return HTML.replace("{film_options}", film_options)
 
 
 @app.post("/run")

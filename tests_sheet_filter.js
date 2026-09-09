@@ -32,6 +32,7 @@ const esc = s => String(s)
 const block = appSrc.slice(start, end) + appSrc.slice(rowStart, rowEnd);
 const api = new Function('esc', block +
   '\nreturn { buildRows, rowsForMode, chipCounts, defaultMode, rowHtml, ' +
+  'copyLineFor, ' +
   'REASON_NO_FREE_SPACE, REASON_LINE_TOO_LONG, REASON_BOXED_IN };')(esc);
 
 const d = JSON.parse(
@@ -102,6 +103,51 @@ check('rendered default HTML contains no cleared cue', inHtml.length === 0,
   'found: ' + inHtml.join(', '));
 check('rendered default HTML contains the still-red cues',
   leftoverIdx.every(i => html.includes('>' + pad(i) + '</div>')));
+
+// 5. Clicking a still-red cue must yield a pasteable spotting note, and a
+// cleared cue must yield nothing at all.
+const leftoverRows = rows.filter(r => r.reason !== '');
+const clearedRows  = rows.filter(r => r.reason === '');
+
+const emptyNotes = leftoverRows
+  .filter(r => !api.copyLineFor(r).trim())
+  .map(r => r.finding.cue_index);
+check('every still-red cue copies a non-empty note', emptyNotes.length === 0,
+  'empty for cues: ' + emptyNotes.join(', '));
+
+const copyableCleared = clearedRows
+  .filter(r => api.copyLineFor(r) !== '')
+  .map(r => r.finding.cue_index);
+check('no cleared cue is copyable', copyableCleared.length === 0,
+  'copyable cleared cues: ' + copyableCleared.join(', '));
+
+// The note has to carry every field a spotting editor would retype.
+leftoverRows.slice(0, 5).forEach(function(r) {
+  const line = api.copyLineFor(r);
+  const f = r.finding;
+  const idx = pad(f.cue_index);
+  const missing = [];
+  if (!line.includes('cue ' + idx))       missing.push('index');
+  if (!line.includes(f.timecode))         missing.push('timecode');
+  if (!line.includes(f.unit))             missing.push('unit');
+  if (!line.includes(r.reason))           missing.push('reason');
+  if (!line.includes(f.text_preview.trim().slice(0, 20))) missing.push('text');
+  if (line.includes('\n'))                missing.push('single line');
+  check('note for cue ' + idx + ' carries every field', missing.length === 0,
+    'missing: ' + missing.join(', ') + ' | ' + line);
+});
+
+// A row the sheet renders as copyable must be exactly a still-red row.
+const copyableHtml = api.rowsForMode(rows, 'all')
+  .map(r => ({ r, html: api.rowHtml(r, d.classification) }));
+const markedCleared = copyableHtml
+  .filter(x => x.r.reason === '' && x.html.includes('copyable'))
+  .map(x => x.r.finding.cue_index);
+check('rendered cleared rows carry no copy handle', markedCleared.length === 0,
+  'marked: ' + markedCleared.join(', '));
+check('rendered still-red rows carry a copy handle',
+  copyableHtml.filter(x => x.r.reason !== '')
+    .every(x => x.html.includes('data-copy="')));
 
 console.log(failures === 0 ? '\nPASS' : '\n' + failures + ' FAILED');
 process.exit(failures === 0 ? 0 : 1);
