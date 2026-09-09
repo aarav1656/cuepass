@@ -249,6 +249,35 @@ Search finds candidate pages, and is not allowed to produce a number.
 second" could have come from a blog restating a spec that has since changed, so
 Cuepass treats Search output as a menu of pages and nothing more.
 
+Search is also the only way a URL gets onto that menu. `extract_spec_page`
+refuses any URL that was not returned by a `search_spec_candidates` call in the
+same run: a constant in `parallel_spec.py` and a URL the model remembers from
+training are both refused before the fetch, so neither reaches the evidence
+ledger and neither can become a measurement. Every cited page carries how it was
+found, `parallel_search` with the search id, the rank and the queries, or
+`seed_fallback`, and that label rides into the stored run and onto the page.
+
+There is one URL written in this repository,
+`parallel_spec.SEARCH_FAILURE_FALLBACK_URLS`, and it fires on exactly one
+condition: **Parallel Search returned zero candidates on any host that profile
+publishes on** (`OFFICIAL_HOSTS`). One official-host result and it is not
+offered, not sorted, and not extractable. It holds no number. Even on that
+branch the page is still opened by Extract and every threshold still comes off
+the extracted text with its sentence, and the interface says the run stood on
+the fallback instead of a discovery.
+
+```
+$ pytest test_spec_integrity.py -q -k "hardcoded or invented_url or fallback_fires"
+4 passed, 66 deselected
+```
+
+| Guard | Holds |
+|---|---|
+| `test_search_finds_the_url_and_the_hardcoded_one_is_not_offered` | Search returned an official page, so no URL from source is on the desk's menu |
+| `test_the_hardcoded_url_cannot_be_extracted_when_search_succeeded` | not offered also means not fetched, not in the ledger, not a spec |
+| `test_a_model_invented_url_is_refused_even_on_the_right_host` | the desk cannot type an address, even a plausible one |
+| `test_the_fallback_fires_only_on_no_official_result_and_says_so` | the one branch that uses a stored URL, and the label it carries |
+
 Extract opens the page. `client.extract(urls=[...], session_id=...)` pulls
 the page as markdown, carrying the `session_id` Search returned so the two calls
 are one piece of agent work. Every threshold is read from that extracted text by

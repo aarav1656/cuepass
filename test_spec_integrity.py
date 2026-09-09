@@ -1673,3 +1673,201 @@ def test_the_fixture_is_entirely_two_digit_and_the_naive_read_is_visibly_wrong(r
         "the naive reading is indistinguishable from the correct one here, so "
         f"this guard proves nothing: {short_naive} vs {short_correct}"
     )
+
+
+# --- where the cited URL came from ---------------------------------------
+#
+# The bug these guard is not a crash. It is a claim: Cuepass says the page it
+# measures against is found by Parallel Search at runtime. The URL for the two
+# Netflix profiles used to be written in parallel_spec.py and inserted at the
+# top of every candidate list, sorted first, and told to the desk as "open this
+# one first". Search ran, its results were never the thing that mattered, and
+# anyone grepping the repo found the answer in the source.
+#
+# So: Search discovers, Extract may only open what Search offered, and the one
+# hardcoded URL left fires on one stated condition and is labelled everywhere it
+# appears. These tests hold that, and each one is run red by restoring the old
+# behaviour.
+
+
+class _FakeResult:
+    def __init__(self, url, title="t", excerpts=()):
+        self.url = url
+        self.title = title
+        self.excerpts = list(excerpts)
+
+
+class _FakeSearch:
+    def __init__(self, results, session_id="sess_1", search_id="srch_1"):
+        self.results = results
+        self.session_id = session_id
+        self.search_id = search_id
+
+
+class _FakeExtractResult:
+    def __init__(self, url, text):
+        self.url = url
+        self.title = "extracted"
+        self.publish_date = None
+        self.full_content = text
+        self.excerpts = []
+
+
+class _FakeExtract:
+    def __init__(self, url, text):
+        self.results = [_FakeExtractResult(url, text)]
+        self.errors = []
+        self.extract_id = "extr_1"
+        self.session_id = "sess_1"
+
+
+class _FakeClient:
+    """Stands in for the Parallel SDK client so the wiring is testable offline.
+
+    The live round trip against the real API is
+    test_real_data.py::test_parallel_search_then_extract_reaches_a_real_spec_page,
+    which is the test that proves the integration is reachable. This one proves
+    the URL a run cites is the URL Search returned, which needs the search
+    results to be controllable.
+    """
+
+    PAGE = (
+        "Netflix Timed Text Style Guide. Adult programs: Up to 20 characters "
+        "per second. 42 characters per line. 2 lines maximum."
+    )
+
+    def __init__(self, urls):
+        self.urls = urls
+        self.extracted = []
+
+    def search(self, **kwargs):
+        return _FakeSearch([_FakeResult(u) for u in self.urls])
+
+    def extract(self, urls, **kwargs):
+        self.extracted.append(urls[0])
+        return _FakeExtract(urls[0], self.PAGE)
+
+
+DISCOVERED = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/999-Discovered-Guide"
+
+
+@pytest.fixture
+def clean_registers():
+    ps.ledger_clear()
+    ps.discovery_clear()
+    yield
+    ps.ledger_clear()
+    ps.discovery_clear()
+
+
+def test_search_finds_the_url_and_the_hardcoded_one_is_not_offered(
+    monkeypatch, clean_registers
+):
+    """Search returned an official page, so no URL from this file is on the menu."""
+    fake = _FakeClient([DISCOVERED])
+    monkeypatch.setattr(ps, "_client", lambda: fake)
+
+    found = ps.search_spec_candidates("netflix_en_us")
+
+    assert found["seed_fallback_fired"] is False
+    assert found["official_from_search"] == 1
+    urls = [c["url"] for c in found["candidates"]]
+    assert urls == [DISCOVERED]
+    hardcoded = ps.SEARCH_FAILURE_FALLBACK_URLS["netflix_en_us"]
+    assert hardcoded not in urls, "a URL written in parallel_spec.py reached the desk"
+    assert found["candidates"][0]["discovery"] == "parallel_search"
+    assert found["candidates"][0]["search_rank"] == 1
+
+
+def test_the_hardcoded_url_cannot_be_extracted_when_search_succeeded(
+    monkeypatch, clean_registers
+):
+    """The half that matters: not offered also means not openable.
+
+    Suppressing the URL from the candidate list would be cosmetic on its own,
+    since the desk is a language model that has read the Netflix help centre.
+    This is the check that makes the suppression real.
+    """
+    fake = _FakeClient([DISCOVERED])
+    monkeypatch.setattr(ps, "_client", lambda: fake)
+    ps.search_spec_candidates("netflix_en_us")
+
+    hardcoded = ps.SEARCH_FAILURE_FALLBACK_URLS["netflix_en_us"]
+    refused = ps.extract_spec_page("netflix_en_us", hardcoded, "sess_1")
+    assert refused["found"] == []
+    assert "not offered by search_spec_candidates" in refused["error"]
+    assert hardcoded not in fake.extracted, "the page was fetched anyway"
+    assert hardcoded not in ps.ledger_urls(), "a refused URL reached the ledger"
+    with pytest.raises(ps.ParallelUnavailableError):
+        ps.spec_from_ledger("netflix_en_us", [hardcoded])
+
+    # And the discovered one goes all the way through, so the refusal above is
+    # about provenance and not about the code path being broken.
+    read = ps.extract_spec_page("netflix_en_us", DISCOVERED, "sess_1")
+    assert "max_cps" in read["found"]
+    assert read["discovery"] == "parallel_search"
+    spec = ps.spec_from_ledger("netflix_en_us", [read["url"]])
+    assert spec["max_cps"] == pytest.approx(20.0)
+    assert spec["discovery"] == "parallel_search"
+    assert spec["source_discovery"][0]["search_rank"] == 1
+    assert spec["source_discovery"][0]["queries"] == ps.PLATFORM_QUERIES["netflix_en_us"]
+
+
+def test_a_model_invented_url_is_refused_even_on_the_right_host(
+    monkeypatch, clean_registers
+):
+    """The desk cannot type an address. Same gate, different attacker."""
+    fake = _FakeClient([DISCOVERED])
+    monkeypatch.setattr(ps, "_client", lambda: fake)
+    ps.search_spec_candidates("netflix_en_us")
+
+    invented = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/111111-Remembered"
+    result = ps.extract_spec_page("netflix_en_us", invented, "sess_1")
+    assert result["found"] == []
+    assert "not offered by search_spec_candidates" in result["error"]
+    assert fake.extracted == [], "an invented URL was fetched"
+
+
+def test_the_fallback_fires_only_on_no_official_result_and_says_so(
+    monkeypatch, clean_registers
+):
+    """Search came back with nothing on a Netflix host. Now, and only now."""
+    fake = _FakeClient(["https://subtitlesedit.com/blog/netflix-style-guide-explained"])
+    monkeypatch.setattr(ps, "_client", lambda: fake)
+
+    found = ps.search_spec_candidates("netflix_en_us")
+    assert found["official_from_search"] == 0
+    assert found["seed_fallback_fired"] is True
+    lead = found["candidates"][0]
+    assert lead["url"] == ps.SEARCH_FAILURE_FALLBACK_URLS["netflix_en_us"]
+    assert lead["discovery"] == "seed_fallback"
+
+    # The label survives Extract, the ledger and the spec, which is the only
+    # thing that lets a reader tell this run apart from a discovered one.
+    read = ps.extract_spec_page("netflix_en_us", lead["url"], found["session_id"])
+    assert read["discovery"] == "seed_fallback"
+    spec = ps.spec_from_ledger("netflix_en_us", [read["url"]])
+    assert spec["discovery"] == "seed_fallback"
+    assert spec["source_discovery"][0]["how"] == "seed_fallback"
+
+
+def test_a_profile_with_no_fallback_url_gets_no_fallback(monkeypatch, clean_registers):
+    """Only the two Netflix profiles have one, and the dict is the whole list."""
+    fake = _FakeClient(["https://subtitlesedit.com/blog/whatever"])
+    monkeypatch.setattr(ps, "_client", lambda: fake)
+
+    assert "bbc" not in ps.SEARCH_FAILURE_FALLBACK_URLS
+    found = ps.search_spec_candidates("bbc")
+    assert found["seed_fallback_fired"] is False
+    assert [c["discovery"] for c in found["candidates"]] == ["parallel_search"]
+
+
+def test_no_threshold_value_is_written_beside_a_fallback_url():
+    """The fallback dict holds addresses, never numbers.
+
+    A URL in source is defensible when it is labelled. A number in source beside
+    it would mean the page never had to be opened at all.
+    """
+    for platform, url in ps.SEARCH_FAILURE_FALLBACK_URLS.items():
+        assert isinstance(url, str) and url.startswith("https://")
+        assert not re.search(r"\d+\s*(characters|cps|frames|lines)", url)

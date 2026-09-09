@@ -1,13 +1,24 @@
 """Caption delivery specs, read off the buyer's own published page at runtime.
 
-One exception, stated up front and labelled in every result: `PINNED_FALLBACKS`
-at the bottom of this file. See the comment above it.
+Two exceptions, both stated up front and both labelled in every result they
+touch:
+
+  * `PINNED_FALLBACKS` at the bottom of this file: a published VALUE, with its
+    page and its sentence, filling a rule the pages this run opened did not
+    state. Never reading speed. See the comment above it.
+  * `SEARCH_FAILURE_FALLBACK_URLS`: a published URL, no value, offered to the
+    desk on exactly one condition, that Parallel Search returned no candidate on
+    a host the buyer publishes on. See the comment above it.
 
 Two Parallel surfaces, in a chain, both load-bearing:
 
   1. `client.search(...)`  finds candidate spec pages. Search is allowed to
      return URLs. Search is NOT allowed to produce a number: a snippet that
      says "17 characters per second" could have come from a 2019 blog post.
+     Search is where the URL comes from: `extract_spec_page` refuses any URL
+     that was not offered by a `search_spec_candidates` call in this same run,
+     so neither a constant in this file nor a URL the model remembered can be
+     opened, let alone measured against.
   2. `client.extract(urls=[...], session_id=...)`  pulls the actual page and
      returns it as markdown. Every threshold on the live path is read out of
      that extracted page text, and every threshold Cuepass measures against,
@@ -94,12 +105,25 @@ PROFILE_SCOPE: dict[str, str] = {
     "fcc": "The FCC's published closed-captioning quality rules for US broadcast.",
 }
 
-# The page each profile is defined by. This is a starting candidate, not an
-# answer: the desk still opens it with Parallel Extract and the numbers still
-# come off the page text with their clause. No threshold is written down here,
-# and a profile whose page stops publishing a number reports that rather than
-# falling back to the other profile's figure.
-PROFILE_SEED_URLS: dict[str, str] = {
+# SEARCH-FAILURE FALLBACK. Not a seed, not a starting candidate, and not part of
+# the normal path.
+#
+# It fires under exactly one condition, asserted in `search_spec_candidates` and
+# reported in that call's result as `seed_fallback_fired`: Parallel Search
+# returned zero candidates on any host in `OFFICIAL_HOSTS` for this profile. If
+# Search returns even one official-host URL, nothing in this dict is offered to
+# the desk, nothing in it can be extracted, and the URL Cuepass cites is a URL
+# Search found this run.
+#
+# When it does fire the candidate is labelled `discovery: "seed_fallback"`, that
+# label rides through Extract into the evidence ledger, into the spec, into the
+# stored run and onto the page, so a run standing on this dict says so wherever
+# its numbers are shown.
+#
+# No threshold is written down here. Even in the fallback case the page is still
+# opened by Parallel Extract and every number still comes off the extracted page
+# text with the sentence that states it.
+SEARCH_FAILURE_FALLBACK_URLS: dict[str, str] = {
     "netflix_en_us": (
         "https://partnerhelp.netflixstudios.com/hc/en-us/articles/"
         "217350977-English-Timed-Text-Style-Guide"
@@ -404,6 +428,37 @@ def ledger_clear() -> None:
         _LEDGER.clear()
 
 
+# --- where a URL came from ------------------------------------------------
+#
+# The offer register. `search_spec_candidates` writes one row per URL it hands
+# to the desk, saying how that URL was discovered: `parallel_search` with the
+# query that surfaced it and its rank in the result, or `seed_fallback` when
+# Search found nothing on an official host.
+#
+# `extract_spec_page` will only open a URL that has a row here, so a URL the
+# model wrote from memory, and a URL a future edit of this file hardcodes
+# without offering it through Search, both fail before any page is fetched. The
+# register is per process and per run: `discovery_clear` empties it alongside
+# the ledger at the top of every run.
+
+_DISCOVERY: dict[str, dict] = {}
+
+
+def discovery_put(url: str, row: dict) -> None:
+    with _LEDGER_LOCK:
+        _DISCOVERY.setdefault(url, row)
+
+
+def discovery_get(url: str) -> dict | None:
+    with _LEDGER_LOCK:
+        return _DISCOVERY.get(url)
+
+
+def discovery_clear() -> None:
+    with _LEDGER_LOCK:
+        _DISCOVERY.clear()
+
+
 # --- the two Parallel calls ----------------------------------------------
 
 
@@ -445,12 +500,19 @@ def is_citable_url(url: str) -> bool:
 def search_spec_candidates(platform: str) -> dict:
     """Parallel Search: candidate spec pages for one buyer. Returns URLs only.
 
+    Search discovers the pages. Nothing in this repository names the page a
+    profile ends up cited against, except in the one failure case documented at
+    `SEARCH_FAILURE_FALLBACK_URLS`, which is reported in the return value as
+    `seed_fallback_fired` and labelled on the candidate itself.
+
     Args:
         platform: buyer key, one of netflix, amazon, bbc, fcc.
 
     Returns:
-        A dict with `candidates` (url, title, snippet, is_official), the
-        `session_id` to carry into extract, and the queries that were sent.
+        A dict with `candidates` (url, title, snippet, is_official, discovery,
+        search_rank, found_by_query), the `session_id` to carry into extract,
+        the queries that were sent, `official_from_search`, and
+        `seed_fallback_fired`.
     """
     platform = platform.lower()
     queries = PLATFORM_QUERIES.get(platform, [f"{platform} subtitle specification"])
@@ -470,7 +532,7 @@ def search_spec_candidates(platform: str) -> dict:
 
     hosts = OFFICIAL_HOSTS.get(platform, ())
     candidates = []
-    for r in result.results:
+    for rank, r in enumerate(result.results, start=1):
         url = r.url or ""
         if not is_citable_url(url):
             continue
@@ -481,22 +543,37 @@ def search_spec_candidates(platform: str) -> dict:
                 "title": r.title or url,
                 "snippet": " ".join(r.excerpts or [])[:300],
                 "is_official": any(host == h or host.endswith("." + h) for h in hosts),
+                "discovery": "parallel_search",
+                "search_rank": rank,
             }
         )
-    # The page this profile is defined by, offered as a candidate so the desk can
-    # open it first. It is still only a URL: Extract has to open it and the
-    # numbers still come off the page text. If Search already surfaced it, it is
-    # not duplicated.
-    seed = PROFILE_SEED_URLS.get(platform)
-    if seed and not any(c["url"] == seed for c in candidates):
+
+    official_from_search = sum(1 for c in candidates if c["is_official"])
+
+    # The one documented failure case, and the only branch on which a URL
+    # written in this file reaches the desk: Search came back with nothing on a
+    # host this buyer publishes on, so there is no discovered page to open and
+    # the alternative is a run with no spec at all. See the comment above
+    # SEARCH_FAILURE_FALLBACK_URLS. The candidate is labelled here and stays
+    # labelled through Extract, the ledger, the spec and the stored run.
+    fallback = SEARCH_FAILURE_FALLBACK_URLS.get(platform, "")
+    seed_fallback_fired = bool(fallback) and official_from_search == 0
+    if seed_fallback_fired:
+        logger.warning(
+            "Parallel Search returned no %s page on an official host for %s; "
+            "falling back to the documented URL, which will be labelled as such",
+            platform,
+            platform,
+        )
         candidates.insert(
             0,
             {
-                "url": seed,
-                "title": f"{PLATFORM_LABELS.get(platform, platform)} (profile page)",
+                "url": fallback,
+                "title": f"{PLATFORM_LABELS.get(platform, platform)} (search-failure fallback)",
                 "snippet": PROFILE_SCOPE.get(platform, ""),
                 "is_official": True,
-                "is_profile_page": True,
+                "discovery": "seed_fallback",
+                "search_rank": 0,
             },
         )
 
@@ -504,15 +581,32 @@ def search_spec_candidates(platform: str) -> dict:
         raise ParallelUnavailableError(
             f"Parallel Search returned no usable spec page for {platform}."
         )
-    # The profile's own page first, then official hosts. The desk still chooses;
-    # this only orders the menu it is choosing from.
-    candidates.sort(key=lambda c: (not c.get("is_profile_page"), not c["is_official"]))
+    # Official hosts first, and within them Search's own ranking. The desk still
+    # chooses; this only orders the menu it is choosing from.
+    candidates.sort(key=lambda c: (not c["is_official"], c["search_rank"]))
+    candidates = candidates[:6]
+
+    # Only these URLs can be extracted this run.
+    for c in candidates:
+        discovery_put(
+            c["url"],
+            {
+                "how": c["discovery"],
+                "search_rank": c["search_rank"],
+                "search_id": result.search_id,
+                "queries": queries,
+                "platform": platform,
+            },
+        )
+
     return {
         "platform": platform,
-        "candidates": candidates[:6],
+        "candidates": candidates,
         "session_id": result.session_id,
         "search_id": result.search_id,
         "queries": queries,
+        "official_from_search": official_from_search,
+        "seed_fallback_fired": seed_fallback_fired,
     }
 
 
@@ -536,7 +630,23 @@ def extract_spec_page(platform: str, url: str, session_id: str = "") -> dict:
     platform = platform.lower()
     if not is_citable_url(url):
         return {"url": url, "error": "not a citable url", "found": [], "thresholds": {}}
+    # No key is a hard stop for the whole integration, so it is raised before
+    # anything else is judged.
     client = _client()
+    # A URL only becomes openable by being offered in a search result this run.
+    # Refused before the fetch, so nothing about the page enters the process and
+    # no ledger row is written, which is what stops it becoming a measurement.
+    discovery = discovery_get(url)
+    if discovery is None:
+        return {
+            "url": url,
+            "error": (
+                "this URL was not offered by search_spec_candidates in this run. "
+                "Call search first and pass back a url from its candidates."
+            ),
+            "found": [],
+            "thresholds": {},
+        }
     try:
         response = client.extract(
             urls=[url],
@@ -570,12 +680,21 @@ def extract_spec_page(platform: str, url: str, session_id: str = "") -> dict:
         "session_id": response.session_id,
         "chars_extracted": len(page_text),
         "platform": platform,
+        # How this URL reached the desk. Rides through to the spec and the
+        # stored run so a number can always be traced back to the search that
+        # found the page it was read off.
+        "discovery": discovery,
     }
     ledger_put(entry)
+    # Extract can resolve a redirect, so the page that came back is not always
+    # the URL that was asked for. Register the resolved one under the same
+    # provenance, or the desk's own accepted URL would have no row.
+    discovery_put(entry["url"], discovery)
     return {
         "url": entry["url"],
         "title": entry["title"],
         "found": entry["found"],
+        "discovery": discovery["how"],
         "states_a_measurable_rule": bool(entry["thresholds"]),
         "states_reading_speed": "max_cps" in entry["thresholds"],
         "chars_extracted": entry["chars_extracted"],
@@ -730,6 +849,21 @@ def spec_from_ledger(platform: str, urls: list[str] | str) -> dict:
         "source_url": lead["url"],
         "source_label": lead["title"],
         "source_urls": [e["url"] for e in entries],
+        # How each cited page was found. `parallel_search` means Parallel Search
+        # returned that URL this run at that rank, off those queries.
+        # `seed_fallback` means Search returned nothing on an official host and
+        # the documented fallback URL fired; see SEARCH_FAILURE_FALLBACK_URLS.
+        "source_discovery": [
+            {
+                "url": e["url"],
+                "how": (e.get("discovery") or {}).get("how", "unrecorded"),
+                "search_rank": (e.get("discovery") or {}).get("search_rank"),
+                "search_id": (e.get("discovery") or {}).get("search_id", ""),
+                "queries": (e.get("discovery") or {}).get("queries", []),
+            }
+            for e in entries
+        ],
+        "discovery": (lead.get("discovery") or {}).get("how", "unrecorded"),
         "publish_date": lead["publish_date"],
         "extract_id": lead["extract_id"],
         "session_id": lead["session_id"],

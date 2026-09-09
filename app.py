@@ -502,6 +502,19 @@ def _buyer_view(
             # spread across pages, so the count is part of the provenance: one
             # page is a lucky hit, three is a resolution.
             "source_urls": [u for u in (safe_url(x) for x in spec.get("source_urls") or []) if u],
+            # How the cited page was found. "parallel_search" means Parallel
+            # Search returned this URL during this run, at search_rank, off the
+            # queries below. "seed_fallback" means Search returned nothing on a
+            # host this buyer publishes on and the documented fallback URL in
+            # parallel_spec.py fired, which the page says out loud rather than
+            # letting the citation imply a discovery that did not happen.
+            "discovery": spec.get("discovery", ""),
+            "search_rank": next(
+                (d.get("search_rank") for d in spec.get("source_discovery") or []), None
+            ),
+            "search_queries": next(
+                (d.get("queries") or [] for d in spec.get("source_discovery") or []), []
+            ),
             "desk_reason": spec.get("desk_reason", ""),
             # What this profile covers, in the run's own words. Two profiles
             # from one company are two scopes, not a contradiction, and the
@@ -1864,6 +1877,18 @@ function renderSpecBand(run, buyerKey) {
   } else if (s.url_withheld) {
     prov.push('<span class="withheld">source URL withheld: the result came back malformed, '
       + 'and Cuepass will not print a link it cannot resolve</span>');
+  }
+  // Where the URL above came from. A citation with no discovery behind it is a
+  // bookmark, so the page says which of the two it is looking at.
+  if (s.discovery === 'parallel_search') {
+    var q = (s.search_queries || [])[0] || '';
+    prov.push('<span>found by Parallel Search'
+      + (s.search_rank ? ', result ' + esc(String(s.search_rank)) : '')
+      + (q ? ' for &ldquo;' + esc(q) + '&rdquo;' : '') + '</span>');
+  } else if (s.discovery === 'seed_fallback') {
+    prov.push('<span class="withheld">Parallel Search returned no page on a host this '
+      + 'buyer publishes on, so this run opened the fallback URL recorded in '
+      + 'parallel_spec.py. The numbers are still read off the page Extract pulled.</span>');
   }
   // A profile's rules are not all on one page. Saying how many were opened is
   // the difference between a lucky single hit and a resolution across a guide.
