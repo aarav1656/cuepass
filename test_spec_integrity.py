@@ -1619,3 +1619,57 @@ def test_root_agent_is_importable_with_no_credentials():
     assert kind == "Workflow"
     assert name == "cuepass_delivery_desk"
     assert int(nodes) == len(importlib.import_module("cuepass_agents").graph_shape()["nodes"])
+
+
+# --- the two-digit fractional field --------------------------------------
+#
+# Every timestamp in the archive.org ASR fixture writes TWO fractional digits,
+# "00:00:30,95". SRT is nominally HH:MM:SS,mmm, so a parser that divides the
+# field by 1000 reads that as 95ms instead of 950ms and every duration on the
+# track is out by a factor of ten. Reading speed is characters over duration,
+# so every cps figure Cuepass publishes about this file would be wrong by the
+# same factor, in the direction that invents violations.
+#
+# `_seconds` divides by 10**len(field), which reads two digits as hundredths.
+# That is the correct reading and these tests hold it there.
+
+
+def test_two_digit_fractions_are_hundredths_not_thousandths():
+    """Break it by dividing the fractional field by a fixed 1000."""
+    cues = m.parse_srt("1\n00:00:30,95 --> 00:00:31,52\nIn the.\n")
+    assert len(cues) == 1
+    cue = cues[0]
+    assert cue["start"] == pytest.approx(30.95), "two digits read as milliseconds"
+    assert cue["end"] == pytest.approx(31.52)
+    assert cue["duration"] == pytest.approx(0.57)
+
+    # Three digits still mean thousandths, on the same code path.
+    three = m.parse_srt("1\n00:00:30,950 --> 00:00:31,520\nIn the.\n")[0]
+    assert three["start"] == pytest.approx(30.95)
+    assert three["duration"] == pytest.approx(0.57)
+
+
+def test_the_fixture_is_entirely_two_digit_and_the_naive_read_is_visibly_wrong(real_srt):
+    """The fixture's own shape, and the size of the error being avoided.
+
+    Asserts the second half too: if the naive reading produced roughly the same
+    durations, this guard would be decorative. It does not, so a regression in
+    `_seconds` moves real numbers.
+    """
+    fields = re.findall(r"\d+:\d+:\d+[,.](\d+)\s*-->\s*\d+:\d+:\d+[,.](\d+)", real_srt)
+    assert fields, "no timestamps found in the fixture"
+    widths = {len(f) for pair in fields for f in pair}
+    assert widths == {2}, f"fixture fraction widths are {widths}, not all two digits"
+    # A millisecond field would carry values above 99. None here does, which is
+    # what makes hundredths the only reading the file supports.
+    assert max(int(f) for pair in fields for f in pair) <= 99
+
+    correct = m.parse_srt(real_srt)
+    naive = m.parse_srt(re.sub(r"([,.])(\d\d)(?=\s|$)", r"\g<1>0\g<2>", real_srt))
+    short_correct = sum(1 for c in correct if 0 < c["duration"] < 0.2)
+    short_naive = sum(1 for c in naive if 0 < c["duration"] < 0.2)
+    assert short_correct <= 1, short_correct
+    assert short_naive > 10 * max(short_correct, 1), (
+        "the naive reading is indistinguishable from the correct one here, so "
+        f"this guard proves nothing: {short_naive} vs {short_correct}"
+    )
