@@ -1924,7 +1924,7 @@ function renderSpecBand(run, buyerKey) {
   if (pages > 1) {
     prov.push('<span>' + pages + ' pages opened</span>');
   }
-  if (s.extract_id) prov.push('<span>' + esc(String(s.extract_id).slice(0, 24)) + '</span>');
+  if (s.extract_id) prov.push('<span class="sb-parallel-loud">extract_id ' + esc(String(s.extract_id).slice(0, 28)) + '</span>');
   if (s.chars_extracted) prov.push('<span>' + num(s.chars_extracted) + ' chars read</span>');
   prov.push('<span>' + (live ? 'fetched this run, not cached' : 'from the spec cache') + '</span>');
 
