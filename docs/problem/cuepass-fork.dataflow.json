@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "One publisher, two live pages, and a cue that is legal and illegal at the same time",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      620
+    ]
+  },
+  "stages": [
+    {
+      "label": "The same publisher, two current pages"
+    },
+    {
+      "label": "The clause, read off that page"
+    },
+    {
+      "label": "One cue. One piece of arithmetic."
+    },
+    {
+      "label": "Two deliveries, and only one can happen"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "ttsg",
+      "type": "external",
+      "label": "English TTSG",
+      "sublabel": "article 217350977",
+      "stage": 0,
+      "row": 0,
+      "tag": "live page"
+    },
+    {
+      "id": "tpl",
+      "type": "external",
+      "label": "Templates TTSG",
+      "sublabel": "article 219375728",
+      "stage": 0,
+      "row": 3,
+      "tag": "live page"
+    },
+    {
+      "id": "l20",
+      "type": "database",
+      "label": "Up to 20 cps",
+      "sublabel": "section I.14, adult",
+      "stage": 1,
+      "row": 0,
+      "tag": "verbatim"
+    },
+    {
+      "id": "l17",
+      "type": "database",
+      "label": "Up to 17 cps",
+      "sublabel": "section 23, adult",
+      "stage": 1,
+      "row": 3,
+      "tag": "verbatim"
+    },
+    {
+      "id": "within",
+      "type": "messagebus",
+      "label": "19.0 cps: inside",
+      "sublabel": "76 chars in 4.0 s",
+      "stage": 2,
+      "row": 0,
+      "tag": "compliant"
+    },
+    {
+      "id": "over",
+      "type": "security",
+      "label": "19.0 cps: over",
+      "sublabel": "the same 76 chars",
+      "stage": 2,
+      "row": 3,
+      "tag": "not compliant"
+    },
+    {
+      "id": "ship",
+      "type": "cloud",
+      "label": "Ship untouched",
+      "sublabel": "no cue retimed",
+      "stage": 3,
+      "row": 0,
+      "tag": "outcome"
+    },
+    {
+      "id": "redo",
+      "type": "security",
+      "label": "Retime, redeliver",
+      "sublabel": "the band must move",
+      "stage": 3,
+      "row": 3,
+      "tag": "outcome"
+    }
+  ],
+  "flows": [
+    {
+      "id": "ttsg-l20",
+      "from": "ttsg",
+      "to": "l20",
+      "label": "as printed",
+      "classification": "read live",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tpl-l17",
+      "from": "tpl",
+      "to": "l17",
+      "label": "as printed",
+      "classification": "read live",
+      "variant": "emphasis"
+    },
+    {
+      "id": "l20-within",
+      "from": "l20",
+      "to": "within",
+      "label": "76 / 4.0",
+      "classification": "at most 20",
+      "variant": "default"
+    },
+    {
+      "id": "l17-over",
+      "from": "l17",
+      "to": "over",
+      "label": "76 / 4.0",
+      "classification": "over 17",
+      "variant": "default"
+    },
+    {
+      "id": "within-ship",
+      "from": "within",
+      "to": "ship",
+      "label": "nothing to do",
+      "classification": "zero cost",
+      "variant": "emphasis"
+    },
+    {
+      "id": "over-redo",
+      "from": "over",
+      "to": "redo",
+      "label": "shorten or hold",
+      "classification": "full redelivery",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "The two halves never meet",
+      "items": [
+        "Both pages are Netflix and both are current. Nothing crosses the middle because nothing can: one duration, one character count, two answers."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "A hardcoded limit picks a side silently",
+      "items": [
+        "A tool with 17 or 20 compiled into its source holds one number, so it reports a verdict but never a disagreement. Every cue in the band is a retime."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Sourced, and not sourced",
+      "items": [
+        "Both limits verbatim: Netflix articles 217350977 and 219375728, fetched 2026-09-09, screenshots in evidence/. The 76 characters over 4.0 seconds is a worked example, not a quotation."
+      ]
+    }
+  ]
+}
