@@ -352,15 +352,15 @@ class TestCitableUrl:
         # Real observed Parallel result.
         bad = ("https://subtitlesedit.com/blog/netflix-subtitle-s:Users:kevinrato:"
                "Desktop:subtitlesedit:posts:netflix.mdxtyle-guide-explained")
-        assert not parallel_spec._is_citable_url(bad)
+        assert not parallel_spec.is_citable_url(bad)
 
     def test_accepts_real_spec_url(self):
         good = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617"
-        assert parallel_spec._is_citable_url(good)
+        assert parallel_spec.is_citable_url(good)
 
     def test_rejects_empty_and_non_http(self):
-        assert not parallel_spec._is_citable_url("")
-        assert not parallel_spec._is_citable_url("ftp://example.com/spec")
+        assert not parallel_spec.is_citable_url("")
+        assert not parallel_spec.is_citable_url("ftp://example.com/spec")
 
 
 class TestLeftoverReasons:
@@ -409,7 +409,13 @@ class TestLeftoverReasons:
 
 
 class TestTakeRepairedTrack:
-    """The operator leaves with the same file the second measure ran on."""
+    """The operator leaves with the same file the second measure ran on.
+
+    These used to reach into an in-memory dict that only lived as long as the
+    process, which is why a download link died on every container restart. They
+    now go through the durable store, so the thing under test is the thing a
+    returning visitor actually gets.
+    """
 
     SRC = (
         "1\n00:00:01,000 --> 00:00:01,200\nA long line of dialogue that needs more time\n\n"
@@ -417,71 +423,112 @@ class TestTakeRepairedTrack:
         "3\n00:00:20,000 --> 00:00:22,000\nFine\n"
     )
 
-    def _client(self, tmp_path):
-        import agent as agent_mod
-        import app as app_mod
-        from fastapi.testclient import TestClient
+    def _store(self, tmp_path, monkeypatch):
+        import runstore
 
-        agent_mod.DATA_DIR = tmp_path
-        agent_mod.REPAIRED_FILES.clear()
-        return TestClient(app_mod.app), agent_mod
+        monkeypatch.setenv("CUEPASS_RUN_DIR", str(tmp_path))
+        monkeypatch.setattr(runstore, "SEED_DIR", tmp_path)
+        return runstore
 
-    def _write(self, agent_mod, tmp_path):
+    def _save(self, runstore):
         repaired, _ = m.remediate_subtitles(self.SRC)
-        p = tmp_path / "iron_mask_repaired.srt"
-        p.write_text(repaired, encoding="utf-8")
-        agent_mod.REPAIRED_FILES[p.name] = agent_mod._download_name(
-            "The Iron Mask (1929)", "iron_mask"
-        )
-        return repaired
+        before = m.measure_subtitles(self.SRC)
+        after = m.measure_subtitles(repaired)
+        record = {
+            "run_id": "fixture-run",
+            "measured_at": runstore.now_iso(),
+            "film_title": "The Iron Mask",
+            "film_identifier": "iron_mask",
+            "subtitle_filename": "iron_mask.asr.srt",
+            "subtitle_url": "https://archive.org/download/iron_mask/iron_mask.asr.srt",
+            "cue_count": before.cue_count,
+            "buyers": {
+                "netflix": {
+                    "spec": {
+                        "platform": "Netflix",
+                        "source_url": (
+                            "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617"
+                        ),
+                        "source_label": "Timed Text Style Guide",
+                        "max_cps": 17.0,
+                        "min_duration_s": 0.8,
+                        "max_line_chars": 42,
+                        "max_lines": 2,
+                        "evidence": {},
+                        "provenance": {},
+                        "not_verifiable": [],
+                    },
+                    "before": before.summary(),
+                    "after": after.summary(),
+                    "leftover_reasons": {},
+                    "cues_changed": 2,
+                    "verdict": "HOLD",
+                }
+            },
+            "unavailable": {},
+            "editorial": {},
+            "graph": {},
+            "trace": [],
+            "model": "gemini-2.5-flash",
+            "framework": "google-adk",
+            "parallel_surfaces": ["search", "extract"],
+        }
+        return runstore.save(record, {"netflix": repaired}, source_srt=self.SRC), repaired
 
-    def test_download_is_the_repaired_file_not_the_source(self, tmp_path):
-        client, agent_mod = self._client(tmp_path)
-        repaired = self._write(agent_mod, tmp_path)
+    def test_stored_track_is_the_repaired_one_not_the_source(self, tmp_path, monkeypatch):
+        runstore = self._store(tmp_path, monkeypatch)
+        saved, repaired = self._save(runstore)
 
-        r = client.get("/repaired/iron_mask_repaired.srt")
-        assert r.status_code == 200
-        body = r.text
-        assert body.strip(), "empty 200 is not a download"
+        path = runstore.repaired_path(saved["repaired_files"]["netflix"])
+        assert path is not None
+        body = path.read_text(encoding="utf-8")
+        assert body.strip(), "an empty file is not a download"
 
-        # the source and the repaired file differ in cue out-times; the bytes
-        # served must carry the repaired timings, so a source-file regression
-        # (or a stale copy) fails here.
+        # Source and repaired differ in cue out-times, so serving the source by
+        # mistake, or serving a stale copy, fails here.
         assert body != self.SRC
         got = m.parse_srt(body)
         want = m.parse_srt(repaired)
-        assert len(got) == len(want)
         assert [c["end"] for c in got] == [c["end"] for c in want]
-        src = m.parse_srt(self.SRC)
-        assert [c["end"] for c in got] != [c["end"] for c in src]
+        assert [c["end"] for c in got] != [c["end"] for c in m.parse_srt(self.SRC)]
 
-        # and the served bytes measure the same as the after-report the UI shows
-        assert (m.measure_subtitles(body).summary()
-                == m.measure_subtitles(repaired).summary())
+        # And the bytes on disk measure the same as the after-report on screen.
+        assert m.measure_subtitles(body).summary() == m.measure_subtitles(repaired).summary()
 
-    def test_attachment_headers_carry_the_title(self, tmp_path):
-        client, agent_mod = self._client(tmp_path)
-        self._write(agent_mod, tmp_path)
-        r = client.get("/repaired/iron_mask_repaired.srt")
-        cd = r.headers["content-disposition"]
-        assert "attachment" in cd
-        assert "The_Iron_Mask_1929_repaired.srt" in cd
-        assert r.headers["content-type"].startswith("text/x-subrip")
+    def test_the_source_track_is_kept_too(self, tmp_path, monkeypatch):
+        """Both halves of a before and after must be downloadable, not just one."""
+        runstore = self._store(tmp_path, monkeypatch)
+        saved, _ = self._save(runstore)
+        path = runstore.repaired_path(saved["source_file"])
+        assert path is not None
+        assert path.read_text(encoding="utf-8") == self.SRC
 
-    def test_unknown_and_traversal_are_404(self, tmp_path):
-        client, agent_mod = self._client(tmp_path)
-        self._write(agent_mod, tmp_path)
+    def test_a_stored_run_survives_a_fresh_read(self, tmp_path, monkeypatch):
+        """The point of the store: a later reader sees the run without re-running."""
+        runstore = self._store(tmp_path, monkeypatch)
+        self._save(runstore)
+
+        rows = runstore.list_runs()
+        assert len(rows) == 1
+        assert rows[0]["run_id"] == "fixture-run"
+        assert rows[0]["violation_count"] > 0
+        assert rows[0]["measured_at"]
+
+        full = runstore.get_run("fixture-run")
+        assert full is not None
+        assert full["totals"]["cues"] == 3
+        assert len(full["cues"]) == 3, "the cue table must rebuild from the stored source"
+        assert runstore.default_run_id() == "fixture-run"
+
+    def test_unknown_and_traversal_resolve_to_nothing(self, tmp_path, monkeypatch):
+        runstore = self._store(tmp_path, monkeypatch)
+        self._save(runstore)
         (tmp_path.parent / "secret.srt").write_text("nope", encoding="utf-8")
-        for name in (
-            "nothing_here.srt",
-            "../secret.srt",
-            "..%2Fsecret.srt",
-            "/etc/passwd",
-        ):
-            assert client.get(f"/repaired/{name}").status_code == 404
+        for name in ("nothing_here.srt", "../secret.srt", "/etc/passwd", "run.json"):
+            assert runstore.repaired_path(name) is None
 
-    def test_missing_file_after_write_is_404(self, tmp_path):
-        client, agent_mod = self._client(tmp_path)
-        self._write(agent_mod, tmp_path)
-        (tmp_path / "iron_mask_repaired.srt").unlink()
-        assert client.get("/repaired/iron_mask_repaired.srt").status_code == 404
+    def test_missing_file_after_write_resolves_to_nothing(self, tmp_path, monkeypatch):
+        runstore = self._store(tmp_path, monkeypatch)
+        saved, _ = self._save(runstore)
+        (tmp_path / saved["repaired_files"]["netflix"]).unlink()
+        assert runstore.repaired_path(saved["repaired_files"]["netflix"]) is None

@@ -11,7 +11,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
 
-RUN mkdir -p data
+# The pre-measured run the page opens on, and the fixture track. Without these
+# the first visitor gets an empty page, which is the whole problem they solve.
+COPY data ./data
+
+# Cloud Run's filesystem is read-only outside /tmp, so a run finished by this
+# container is written here rather than back into the image.
+ENV CUEPASS_RUN_DIR=/tmp/cuepass-runs
 
 ENV PORT=8080
 EXPOSE 8080

@@ -98,6 +98,11 @@ class SubtitleReport:
     under_duration_count: int = 0
     over_line_chars_count: int = 0
     over_line_count: int = 0
+    non_positive_duration_count: int = 0
+
+    # Checks the buyer's own page never states, so nothing was measured for
+    # them. Carried through to the UI: a silent spec is not a passing spec.
+    checks_skipped: list[str] = field(default_factory=list)
 
     @property
     def total_violations(self) -> int:
@@ -108,13 +113,32 @@ class SubtitleReport:
         return self.total_violations == 0
 
     def summary(self) -> dict:
+        """Counts, with a check that was never run reported as None, not zero.
+
+        A check with no threshold behind it finds nothing, and a zero in a
+        violation count reads as "clean". So a check listed in `checks_skipped`
+        reports None instead: the caller has to decide what to say about a rule
+        the buyer's page did not state, and cannot accidentally render it as a
+        pass. `total_violations` still counts only real findings, so the arrow
+        pair on screen is never inflated by an unmeasured rule.
+        """
+        skipped = set(self.checks_skipped)
+
+        def count(check: str, value: int) -> int | None:
+            return None if check in skipped else value
+
         return {
             "cue_count": self.cue_count,
             "total_violations": self.total_violations,
-            "over_cps_count": self.over_cps_count,
-            "under_duration_count": self.under_duration_count,
-            "over_line_chars_count": self.over_line_chars_count,
-            "over_line_count": self.over_line_count,
+            "over_cps_count": count("reading_speed", self.over_cps_count),
+            "under_duration_count": count("min_duration", self.under_duration_count),
+            "over_line_chars_count": count("line_length", self.over_line_chars_count),
+            "over_line_count": count("line_count", self.over_line_count),
+            "non_positive_duration_count": count(
+                "min_duration", self.non_positive_duration_count
+            ),
+            "checks_skipped": list(self.checks_skipped),
+            "checks_not_verifiable": list(self.checks_skipped),
             "passed": self.passed,
             "spec_platform": self.spec_platform,
             "spec_source_url": self.spec_source_url,
@@ -140,18 +164,39 @@ def measure_subtitles(
 ) -> SubtitleReport:
     """Measure all QC checks against the given spec thresholds.
 
-    `spec` is a dict from parallel_spec.fetch_spec(); its thresholds override
-    the defaults. If spec is None, the default Netflix constants apply.
+    `spec` is a dict built from a page Parallel Extract opened this run. Its
+    thresholds override the defaults.
+
+    A threshold present in the spec dict with the value None means the buyer's
+    own page never states that rule. That check is then SKIPPED rather than
+    measured against a borrowed number, and the check name is recorded in
+    `checks_skipped`. Silence in a spec is not permission, and it is not a
+    reason to quietly apply another buyer's limit.
+
+    If spec is None, the module defaults apply, which is the unit-test path.
     """
+    skipped: list[str] = []
     if spec:
-        max_cps = spec.get("max_cps", max_cps)
-        min_duration_s = spec.get("min_duration_s", min_duration_s)
-        max_line_chars = spec.get("max_line_chars", max_line_chars)
-        max_lines = spec.get("max_lines", max_lines)
+        if "max_cps" in spec:
+            max_cps = spec["max_cps"]
+        if "min_duration_s" in spec:
+            min_duration_s = spec["min_duration_s"]
+        if "max_line_chars" in spec:
+            max_line_chars = spec["max_line_chars"]
+        if "max_lines" in spec:
+            max_lines = spec["max_lines"]
         platform = spec.get("platform", "Netflix")
         source_url = spec.get("source_url", "")
         source_label = spec.get("source_label", "")
         is_cached = spec.get("is_cached", True)
+        for name, value in (
+            ("reading_speed", max_cps),
+            ("min_duration", min_duration_s),
+            ("line_length", max_line_chars),
+            ("line_count", max_lines),
+        ):
+            if value is None:
+                skipped.append(name)
     else:
         platform = "Netflix (default)"
         source_url = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617"
@@ -169,6 +214,7 @@ def measure_subtitles(
         min_duration_s=min_duration_s,
         max_line_chars=max_line_chars,
         max_lines=max_lines,
+        checks_skipped=skipped,
     )
 
     for idx, c in enumerate(cues, start=1):
@@ -176,10 +222,24 @@ def measure_subtitles(
         preview = c["text"][:60]
         timecode = f"{_fmt_ts(c['start'])} --> {_fmt_ts(c['end'])}"
 
+        # SRT stores milliseconds, so the comparison happens at millisecond
+        # resolution. Subtracting two float seconds does not: 133.79 - 132.99 is
+        # 0.79999999999998295, and a cue the repair set to exactly 800ms then
+        # re-measured as failing an 800ms minimum by one part in 10^14. On the
+        # real track that put 27 cues back into the after-count and printed rows
+        # reading "0.800 s, limit 0.8, fail" and "20.00 cps, limit 20, fail",
+        # which understated the repair by 40 percent and looked like a lie.
+        duration_ms = int(round(c["duration"] * 1000))
+        min_duration_ms = (
+            None if min_duration_s is None else int(math.ceil(min_duration_s * 1000 - 1e-6))
+        )
+        under_minimum = min_duration_ms is not None and duration_ms < min_duration_ms
+
         # reading speed check
-        if c["duration"] > 0 and c["duration"] >= min_duration_s:
-            cps = chars / c["duration"]
-            if cps > max_cps:
+        if max_cps is not None and duration_ms > 0 and not under_minimum:
+            cps = chars / (duration_ms / 1000)
+            # Compared at the precision the sheet prints, for the same reason.
+            if round(cps, 2) > max_cps:
                 report.findings.append(
                     CueFinding(
                         cue_index=idx,
@@ -194,8 +254,27 @@ def measure_subtitles(
                 )
                 report.over_cps_count += 1
 
-        # minimum duration
-        if c["duration"] < min_duration_s:
+        # minimum duration. A cue whose out-time is not after its in-time is a
+        # different defect from a cue that is merely short: it never displays at
+        # all, and it is the row that would divide by zero if the reading-speed
+        # check did not already require a positive duration. It is named as
+        # itself rather than reported as "0.0 seconds, limit 0.833".
+        if min_duration_s is not None and duration_ms <= 0:
+            report.findings.append(
+                CueFinding(
+                    cue_index=idx,
+                    check="non_positive_duration",
+                    value=round(c["duration"], 3),
+                    threshold=0.0,
+                    unit="seconds",
+                    timecode=timecode,
+                    text_preview=preview,
+                    auto_fixable=True,
+                )
+            )
+            report.under_duration_count += 1
+            report.non_positive_duration_count += 1
+        elif under_minimum:
             report.findings.append(
                 CueFinding(
                     cue_index=idx,
@@ -212,7 +291,7 @@ def measure_subtitles(
 
         # line length
         longest = max((len(ln) for ln in c["lines"]), default=0)
-        if longest > max_line_chars:
+        if max_line_chars is not None and longest > max_line_chars:
             report.findings.append(
                 CueFinding(
                     cue_index=idx,
@@ -228,7 +307,7 @@ def measure_subtitles(
             report.over_line_chars_count += 1
 
         # line count
-        if len(c["lines"]) > max_lines:
+        if max_lines is not None and len(c["lines"]) > max_lines:
             report.findings.append(
                 CueFinding(
                     cue_index=idx,
@@ -363,7 +442,10 @@ def explain_leftovers(
             reasons[idx] = REASON_LINE_TOO_LONG
             continue
 
-        if reachable >= needed:
+        # Millisecond comparison, matching measure_subtitles: a cue the repair
+        # can bring to exactly the needed duration is cleared, and must not be
+        # given a leftover reason by a float residue of 1e-14 seconds.
+        if int(round(reachable * 1000)) >= int(round(needed * 1000)):
             continue  # repair cleared this cue
 
         # Still short after extending as far as the next cue allows.

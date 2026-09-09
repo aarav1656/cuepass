@@ -4,10 +4,19 @@ __pycache__/
 dist/
 build/
 .venv/
+.venv312/
 venv/
 .env
 *.env
-data/
+# Downloads and scratch files under data/ are not committed, but two things
+# there are, because the product does not work without them: data/runs holds the
+# real pre-measured run the page opens on, and data/iron_mask.asr.srt is the
+# fixture the tests measure. Note this must be `data/*`, not `data/`: git will
+# not re-include a file inside an excluded directory.
+data/*
+!data/runs/
+!data/iron_mask.asr.srt
+!data/sheet_fixture.json
 *.srt.tmp
 *.mp4
 .DS_Store

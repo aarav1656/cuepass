@@ -1,0 +1,22 @@
+# Cloud Build context. This file exists because gcloud falls back to .gitignore
+# when it is absent, and .gitignore excludes most of data/. The pre-measured run
+# in data/runs is what the page opens on, so leaving it out of the build context
+# ships a container that renders an empty page to the first visitor.
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+.venv312/
+venv/
+.env
+*.env
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+*.mp4
+mitm_mcp_traffic.db
+docs/
+data/*.srt
+!data/iron_mask.asr.srt
