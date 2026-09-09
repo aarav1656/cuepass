@@ -163,9 +163,20 @@ curl -s -o cue.jpg -w "%{http_code} %{content_type} %{size_download}\n" \
 ```
 
 That is a real `google.adk.workflow.Workflow`, built in
-`cuepass_agents.build_workflow`. The desks run concurrently, one per delivery
+`cuepass_agents.build_workflow` and exported as `cuepass_agents.root_agent`, the
+name ADK's own tooling discovers. The desks run concurrently, one per delivery
 profile, because each is an independent research job. A `JoinNode` holds the
 deterministic half back until every desk reports.
+
+```bash
+python -c "import cuepass_agents as c; print(type(c.root_agent).__name__, c.root_agent.name)"
+#   Workflow cuepass_delivery_desk
+```
+
+It imports with no credential in the environment, because building the graph
+constructs `LlmAgent` objects and reads no key until a node runs
+(`test_root_agent_is_importable_with_no_credentials` strips every key and
+imports it in a subprocess).
 
 ```bash
 python -c "
@@ -253,12 +264,15 @@ it has all four. From the Isle of Destiny run:
 Every value carries its own URL rather than inheriting the profile's headline
 citation, and the interface links each number to the page behind it.
 
-One rule has a pinned fallback, the minimum on-screen duration, because neither
-Netflix profile's own page states it and a desk does not always land on a page
-that does. When it fires the value carries the Netflix page it is published on
+Two rules have a pinned fallback, the minimum on-screen duration and the minimum
+gap between subtitles, because both live on Netflix timing pages that neither
+profile's headline article states or links, and a desk does not always land
+there. When a pin fires the value carries the Netflix page it is published on
 and that page's exact sentence, and is labelled `fallback` everywhere it appears.
 Reading speed is never pinned for either profile. The pinned values are
-`PINNED_FALLBACKS` in `parallel_spec.py`; there is nothing else.
+`PINNED_FALLBACKS` in `parallel_spec.py`; there is nothing else, and pinning a
+third rule fails the build rather than quietly widening this paragraph
+(`test_only_the_documented_rules_are_pinned_and_every_pin_is_cited`).
 
 Amazon, the BBC and the FCC are shown as **no citable spec page**, with the
 reason their desk gave and the URLs it tried. The BBC's subtitle guidelines are
@@ -362,6 +376,50 @@ Repair extends cue out-times into space the next cue is not using. It never
 rewrites text, so a line that is simply too long is queued for a human rather
 than machine-edited, and never credited to the repair in the headline pair.
 
+### The repair has to pass the page it repaired against
+
+Extending an out-time closes the gap in front of that cue, and the gap between
+subtitles is a delivery rule in its own right. Netflix states it three times on
+the timing guidelines page: **"Subtitles must have a minimum of 2 frames between
+them."**
+
+Cuepass used to close those gaps to one frame, a 42ms constant in the repair.
+The repaired file therefore failed the same page it had been repaired against,
+and nothing caught it, because the gap rule was not read off any page and no
+check measured it. On the shipped track that put one fresh violation into the
+20 cps file and four into the 17 cps file, under a verdict saying the track had
+improved.
+
+`min_gap_s` is now the fifth threshold, read off the extracted page text in
+Python with its verbatim clause, exactly like the other four.
+`remeasure_every_buyer` reads the repaired file back and raises if the repair
+narrowed any gap below the cited minimum:
+
+```bash
+python - <<'PY'
+import measure
+src = open("data/iron_mask.asr.srt").read()
+for cps in (20.0, 17.0):
+    repaired, changed = measure.remediate_subtitles(src, max_cps=cps, min_duration_s=0.8)
+    source_defects = measure.assert_repair_kept_gaps(src, repaired)   # raises if it did
+    print(f"{cps:>5} cps  {changed} cues retimed  0 gaps introduced "
+          f"({len(source_defects)} already under the minimum in the source)")
+PY
+```
+
+```
+ 20.0 cps  51 cues retimed  0 gaps introduced (269 already under the minimum in the source)
+ 17.0 cps  78 cues retimed  0 gaps introduced (269 already under the minimum in the source)
+```
+
+Drive the same function with the old 42ms and it raises, which is what
+`test_a_repair_working_to_one_frame_is_caught` asserts: a post-condition that
+cannot fail proves nothing.
+
+The 269 pairs the source already delivers under the minimum are the source's
+defect, not the repair's, and they are kept separate. Extending an out-time can
+only close a gap, never open one, so no retime can fix them and none is claimed.
+
 Verdicts are `DELIVER` and `HOLD`, not legal or illegal. A caption style guide is
 a buyer's acceptance criterion, not a statute.
 
@@ -422,7 +480,7 @@ node tests_sheet_filter.js
 ```
 
 ```
-101 passed, 1 skipped
+110 passed, 1 skipped
 SKIPPED [1] test_real_data.py:106: PARALLEL_API_KEY not set
 83 checks, PASS
 ```
@@ -443,7 +501,12 @@ green.
 | The default title must fail | pointing `DEFAULT_FILM` at the 14-cue trailer | `test_default_film_is_a_track_that_fails` |
 | A contrast needs two genuinely different specs | letting `_contrasts` compare equal thresholds | `test_two_profiles_with_the_same_threshold_produce_no_contrast` |
 | Neither profile may pin a reading speed | adding `max_cps` to the pinned fallbacks | `test_netflix_profiles_do_not_share_a_pinned_reading_speed` |
-| Minimum duration is the only pinned rule, and every pin is citable | pinning a second rule, or emptying a pin's clause | `test_min_duration_is_the_only_pinned_rule_and_every_pin_is_cited` |
+| Only the documented rules are pinned, and every pin is citable | pinning a third rule, or emptying a pin's clause | `test_only_the_documented_rules_are_pinned_and_every_pin_is_cited` |
+| The repair leaves the gap the buyer publishes | putting the 42ms one-frame ceiling back | `test_the_repair_leaves_the_cited_gap_in_front_of_every_cue_it_extends` |
+| That gap guard can fail | never; it is driven with the old constant on purpose | `test_a_repair_working_to_one_frame_is_caught` |
+| A gap rule is not read out of the sentence beside it | restoring the loose `gap ... N frames` pattern | `test_the_forbidden_band_sentence_is_not_read_as_the_gap_minimum` |
+| Every repaired timecode is a valid one | rounding the millisecond field on its own again | `test_a_repaired_out_time_on_a_minute_boundary_is_a_valid_timecode` |
+| `root_agent` imports with no credential | making it a factory, or deleting it | `test_root_agent_is_importable_with_no_credentials` |
 | A pinned value reaches the page as `fallback`, never as `live` | making `spec_from_ledger` label the pin `live` | `test_a_pinned_threshold_is_never_labelled_live` |
 | Only a page Extract opened becomes a spec | letting `spec_from_ledger` accept any URL | `test_a_url_nobody_opened_cannot_become_a_spec` |
 | The model has no field for a threshold | adding `max_cps` to `SpecChoice` | `test_the_model_is_never_asked_for_a_threshold` |

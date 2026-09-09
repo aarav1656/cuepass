@@ -17,7 +17,9 @@ POST /run
 
 Search is not allowed to produce a number. Extract opens the page. Every threshold on the live path is read from that text. If Parallel cannot produce a cited spec, the run raises. There is no hardcoded `MAX_CPS`: reading speed is never pinned, for either Netflix profile.
 
-One rule has a pinned fallback, `min_duration_s`, because neither Netflix profile's own page states it and the desk does not always land on a page that does. It is `PINNED_FALLBACKS` in `parallel_spec.py`, carries the Netflix page it is published on and that page's exact sentence, and comes back with provenance `fallback`, which the interface prints beside the number.
+Two rules have a pinned fallback, `min_duration_s` and `min_gap_s`, because both sit on Netflix timing pages that neither profile's headline article states or links, and the desk does not always land there. They are `PINNED_FALLBACKS` in `parallel_spec.py`, each carries the Netflix page it is published on and that page's exact sentence, and each comes back with provenance `fallback`, which the interface prints beside the number.
+
+`min_gap_s` is the gap the repair has to leave in front of every cue it lengthens: "Subtitles must have a minimum of 2 frames between them." The repair used to close gaps to a hardcoded one frame, so the repaired file failed the page it had been repaired against. `remeasure_every_buyer` now reads the repaired file back and raises if the repair narrowed any gap below the cited minimum.
 
 ## Where it is in code
 
@@ -32,6 +34,8 @@ One rule has a pinned fallback, `min_duration_s`, because neither Netflix profil
 ## Google
 
 Each desk is an ADK `LlmAgent` on `gemini-2.5-flash`. The model picks which candidate URL is the buyer's page. It never invents a threshold.
+
+The graph is exported at module scope as `cuepass_agents.root_agent`, the name ADK's tooling discovers, and it imports with no credential set.
 
 The graph is a `google.adk.workflow.Workflow` named `cuepass_delivery_desk`: 13 nodes, 16 edges, of which 6 are `LlmAgent`, 5 are `FunctionNode` that call no model, and one is the `JoinNode` that waits for every desk.
 
