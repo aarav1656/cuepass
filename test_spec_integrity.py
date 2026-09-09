@@ -445,6 +445,24 @@ def test_the_default_run_is_the_worst_stored_run(tmp_path, monkeypatch):
 
     assert runstore.default_run_id() == "severe", "the worst run must lead"
     assert [r["run_id"] for r in runstore.list_runs()] == ["severe", "mild"]
+    # The run the page opens on and the top of the list must be the same run.
+    # Two orderings disagreeing is how the rail comes to say "worst first" above
+    # a different run than the one on screen.
+    assert runstore.default_run_id() == runstore.list_runs()[0]["run_id"]
+    # And "severe" is not simply the newest: it was measured an hour earlier, so
+    # a newest-first ordering would have put "mild" on top.
+    assert runstore.list_runs()[0]["measured_at"] < runstore.list_runs()[1]["measured_at"]
+
+    # There must be exactly one way to ask this question. A second listing helper
+    # with a different order is a second source of truth for the rail's heading.
+    listing_helpers = [
+        name for name in dir(runstore)
+        if not name.startswith("_") and name in ("index", "latest")
+    ]
+    assert listing_helpers == [], (
+        f"a second run-listing helper exists: {listing_helpers}. list_runs() and "
+        "default_run_id() are the only ordering of stored runs."
+    )
 
 
 def test_a_stored_json_record_is_not_downloadable(tmp_path, monkeypatch):
@@ -498,6 +516,261 @@ def test_the_cue_table_flags_a_cue_that_reads_too_fast(tmp_path, monkeypatch):
     assert "reading_speed" in rows[1]["flags"], "40 chars in 1 second is over 17 cps"
     assert rows[1]["cps"] == 40.0
     assert rows[1]["blocked_by"] == "no free space"
+
+
+def test_sheet_flags_and_counts_come_from_one_source(tmp_path, monkeypatch):
+    """A cue flagged on the sheet must be a cue the totals counted.
+
+    `cue_table` used to recompute all four threshold comparisons itself, making it
+    a second answer to "does this cue violate?". It agreed with
+    `measure_subtitles` when written, then `measure_subtitles` moved to
+    millisecond comparisons and this copy stayed on float seconds. A cue sitting
+    exactly on a limit would then be red on the sheet while the total beside it
+    called the track clean.
+
+    The fixture puts a cue at exactly 800ms against an 800ms minimum, which is
+    the case that diverges, and asserts the two views agree.
+    """
+    monkeypatch.setenv("CUEPASS_RUN_DIR", str(tmp_path))
+    monkeypatch.setattr(runstore, "SEED_DIR", tmp_path)
+
+    srt = (
+        # Exactly 800ms: float subtraction gives 0.79999999999998295.
+        "1\n00:02:12,990 --> 00:02:13,790\nShort\n\n"
+        # Genuinely 1ms short, so the check can still fail.
+        "2\n00:03:12,990 --> 00:03:13,789\nAlso short\n\n"
+        # Comfortably legal.
+        "3\n00:04:00,000 --> 00:04:03,000\nFine\n\n"
+        # Over the reading speed.
+        "4\n00:05:00,000 --> 00:05:01,000\n" + ("x" * 40) + "\n"
+    )
+    spec = {
+        "platform": "B", "source_url": "http://b", "source_label": "b",
+        "is_cached": False, "max_cps": 20.0, "min_duration_s": 0.8,
+        "max_line_chars": 42, "max_lines": 2, "evidence": {},
+    }
+    report = m.measure_subtitles(srt, spec=spec)
+    rec = {
+        "run_id": "onesource", "measured_at": runstore.now_iso(), "film_title": "f",
+        "film_identifier": "f", "subtitle_filename": "x.srt", "subtitle_url": "http://x",
+        "cue_count": report.cue_count,
+        "buyers": {"b": {
+            "spec": spec,
+            "before": {**report.summary(), "findings": report.findings_as_dicts()},
+            "after": report.summary(), "leftover_reasons": {},
+            "cues_changed": 0, "verdict": "HOLD"}},
+        "unavailable": {}, "editorial": {}, "graph": {}, "trace": [],
+    }
+    runstore.save(rec, {}, source_srt=srt)
+    rows = runstore.cue_table(runstore.load("onesource"), "b")
+
+    flagged = {r["index"] for r in rows if r["flags"]}
+    counted = {f.cue_index for f in report.findings}
+    assert flagged == counted, (
+        f"sheet and totals disagree: sheet only {sorted(flagged - counted)}, "
+        f"totals only {sorted(counted - flagged)}"
+    )
+    # The boundary cue is the one that used to disagree: clean in both views.
+    assert rows[0]["flags"] == [], "800ms meets an 800ms minimum"
+    # And the fixture is rich enough for the assertion to mean something.
+    assert "min_duration" in rows[1]["flags"], "1ms short must still fail"
+    assert rows[2]["flags"] == []
+    assert "reading_speed" in rows[3]["flags"]
+    # Every flag on a row names a check the report actually raised for that cue.
+    by_cue = {}
+    for f in report.findings:
+        by_cue.setdefault(f.cue_index, set()).add(f.check)
+    for row in rows:
+        assert set(row["flags"]) == by_cue.get(row["index"], set())
+
+
+def test_the_counters_reconcile_to_the_total_without_double_counting():
+    """Four counters sum to the total. The fifth is nested inside one of them.
+
+    `non_positive_duration_count` is a subset of `under_duration_count`: a cue
+    whose out-time is not after its in-time is also a cue under the minimum, and
+    increments both. Anyone treating it as a fifth category gets 181 where the
+    total is 179, and anyone subtracting it on the assumption they are disjoint
+    gets 177. Both are wrong and both look plausible, so the relationship is
+    asserted here rather than left to a reader of the field names.
+    """
+    spec = {**NETFLIX_FULL, "max_cps": 17.0, "min_duration_s": 0.8}
+    srt = (
+        # Out-time before in-time: under the minimum AND non-positive.
+        "1\n00:00:05,000 --> 00:00:04,000\nBackwards\n\n"
+        # Under the minimum but positive.
+        "2\n00:00:10,000 --> 00:00:10,300\nBriefly\n\n"
+        # Over the reading speed.
+        "3\n00:00:20,000 --> 00:00:21,000\n" + ("x" * 40) + "\n\n"
+        # Over the line length.
+        "4\n00:00:30,000 --> 00:00:40,000\n" + ("y" * 50) + "\n\n"
+        # Clean.
+        "5\n00:01:00,000 --> 00:01:03,000\nFine\n"
+    )
+    s = m.measure_subtitles(srt, spec=spec).summary()
+
+    four = (
+        s["over_cps_count"]
+        + s["under_duration_count"]
+        + s["over_line_chars_count"]
+        + s["over_line_count"]
+    )
+    assert four == s["total_violations"], (
+        f"four counters sum to {four}, total says {s['total_violations']}"
+    )
+    # Fixture richness, not an invariant. The reconciliation above is green on any
+    # track with no zero-length cues, because four terms trivially equal the total
+    # when the nested count is zero. This is what proves the nested case is
+    # actually being exercised, so the reconciliation means something.
+    #
+    # It replaces `non_positive_duration_count <= under_duration_count`, which
+    # named this exact relationship and could not detect a violation of it: 2 <= 42
+    # holds when nested and 2 <= 40 holds when disjoint, so it was green in both
+    # worlds. Do not reintroduce it.
+    assert s["non_positive_duration_count"] > 0, (
+        "fixture has no zero-length cue, so the reconciliation proves nothing "
+        "about nesting"
+    )
+    # And with the nested case present, the naive five-term sum overshoots. That
+    # is the trap, asserted rather than described.
+    assert four + s["non_positive_duration_count"] > s["total_violations"]
+
+
+def test_the_stored_run_counters_reconcile():
+    """Same invariant against whatever is on disk, for every profile and stage."""
+    runs = runstore.list_runs()
+    if not runs:
+        pytest.skip("no run stored yet; run seed_run.py")
+    record = runstore.load(runs[0]["run_id"])
+    exercised_nesting = False
+    for buyer, entry in record["buyers"].items():
+        for stage in ("before", "after"):
+            s = entry[stage]
+            four = (
+                (s["over_cps_count"] or 0)
+                + (s["under_duration_count"] or 0)
+                + (s["over_line_chars_count"] or 0)
+                + (s["over_line_count"] or 0)
+            )
+            assert four == s["total_violations"], (
+                f"{buyer}/{stage}: counters sum to {four}, total {s['total_violations']}"
+            )
+            if (s["non_positive_duration_count"] or 0) > 0:
+                exercised_nesting = True
+
+    # The reconciliation above is trivially green wherever the nested count is
+    # zero, which is every `after` stage on this run because the repair clears
+    # those cues. So at least one stage must carry the nested case, or the whole
+    # test proves nothing about nesting on real data.
+    #
+    # A `non_positive <= under_duration` assertion was here instead. It could not
+    # fail: it holds whether the counters are nested or disjoint.
+    assert exercised_nesting, (
+        "no stored stage has a zero-length cue, so the reconciliation is not "
+        "exercising the nested counter on real data"
+    )
+
+
+def test_the_required_word_check_alone_rejects_an_unrelated_number():
+    """Each half of the clause guard must work without the other.
+
+    The guard has two halves: a blacklist of words meaning the sentence is about
+    something else, and a requirement that the sentence mention the rule. Removing
+    either alone killed nothing, because the BBC row trips both. Layered defence
+    is good, but a layer nobody tests is a layer nobody knows is there. This case
+    trips only the required-word half.
+    """
+    # No blacklisted word anywhere, and no mention of a line, so only the
+    # required-word half can reject it.
+    page = "The archive holds 42 characters of metadata for each catalogue entry."
+    assert "max_line_chars" not in ps.read_page_thresholds(page, "http://x")["thresholds"]
+    assert not ps._clause_is_about("max_line_chars", "42 characters of metadata")
+    # And the blacklist half works on a sentence that does mention lines.
+    assert not ps._clause_is_about(
+        "max_line_chars", "Translator's Name is up to 32 characters on one line"
+    )
+
+
+def test_a_run_where_no_profile_resolves_refuses_outright():
+    """No cited spec means no verdict, not a verdict against nothing.
+
+    Deleting this guard killed nothing, yet it is the fail-closed behaviour the
+    whole Parallel claim rests on: if every desk comes back empty there is no
+    threshold to measure against, and the run must raise rather than publish a
+    page measured against silence.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    ctx = _Ctx({f"spec_choice_{b}": {"accepted_urls": [], "reason": "nothing found"}
+                for b in cuepass_agents.BUYERS})
+    with pytest.raises(ps.ParallelUnavailableError, match="No buyer desk produced"):
+        cuepass_agents.bind_cited_specs(ctx)
+
+
+def test_a_desk_naming_a_page_it_never_opened_is_dropped():
+    """A profile is refused at the bind step, not carried on a claim.
+
+    `spec_from_ledger` also refuses an unopened URL, so removing this filter only
+    moved the refusal one layer down and killed no test. Both layers are wanted:
+    this one keeps the reason attached to the profile instead of raising.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    ps.ledger_clear()
+    real = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/999"
+    ps.ledger_put({
+        "url": real, "title": "Real page", "publish_date": None,
+        "extract_id": "e", "session_id": "s", "chars_extracted": 10,
+        "platform": "netflix_en_us",
+        "thresholds": {"max_cps": {"value": 17.0, "clause": "Up to 17 characters per second",
+                                   "url": real}},
+    })
+    state = {f"spec_choice_{b}": {"accepted_urls": [], "reason": "none"}
+             for b in cuepass_agents.BUYERS}
+    state["spec_choice_netflix_en_us"] = {"accepted_urls": [real], "reason": "real"}
+    state["spec_choice_netflix_templates"] = {
+        "accepted_urls": ["https://partnerhelp.netflixstudios.com/hc/en-us/articles/invented"],
+        "reason": "hallucinated",
+    }
+    ctx = _Ctx(state)
+    cuepass_agents.bind_cited_specs(ctx)
+
+    assert "netflix_en_us" in ctx.state["specs"], "the opened page must resolve"
+    assert "netflix_templates" not in ctx.state["specs"], (
+        "a page nobody opened must not become a spec"
+    )
+    assert "netflix_templates" in ctx.state["specs_unavailable"]
+    ps.ledger_clear()
+
+
+def test_the_triage_cap_reports_what_it_left_behind():
+    """The cap is a tunable, so the guard is that it is declared honestly.
+
+    Shrinking the cap killed nothing, which is correct: the number is a budget,
+    not a contract. What must hold is that the run says how many leftovers exist
+    and how many were sent, so a reader can see the queue is partial.
+    """
+    pytest.importorskip("google.adk")
+    import cuepass_agents
+
+    findings = [{"cue_index": i, "check": "reading_speed", "value": 30.0,
+                 "threshold": 17.0, "unit": "chars/sec", "timecode": "",
+                 "text_preview": f"cue {i}", "auto_fixable": True}
+                for i in range(1, 121)]
+    ctx = _Ctx({
+        "before": {"b": {"findings": findings}},
+        "leftover_reasons": {"b": {str(i): "no free space" for i in range(1, 121)}},
+    })
+    out = cuepass_agents.collect_leftovers_for_triage(ctx)
+
+    assert out["leftover_cues"] == 120, "the true total must be reported"
+    assert out["sent_to_triage"] == len(ctx.state["triage_input"])
+    assert out["sent_to_triage"] <= out["leftover_cues"]
+    assert ctx.state["triage_total"] == 120
+    # The two numbers differing is what tells a reader the queue is partial.
+    assert out["sent_to_triage"] < out["leftover_cues"]
 
 
 # --- 5. a contrast between two profiles must be a real contrast ----------
@@ -990,3 +1263,71 @@ def test_stored_records_are_json_and_carry_provenance():
         for buyer, entry in record["buyers"].items():
             assert entry["spec"]["source_url"].startswith("http")
             assert entry["verdict"] in ("DELIVER", "HOLD")
+
+
+def test_min_duration_is_the_only_pinned_rule_and_every_pin_is_cited():
+    """The README's narrowed claim has to stay true of the code.
+
+    README and ARCHITECTURE.md no longer say "no threshold is hardcoded". They say
+    every threshold on the live path is read off the buyer's page, and that exactly
+    one rule, the minimum on-screen duration, has a pinned fallback which carries
+    the page it is published on and its exact sentence. That sentence is only
+    honest while `PINNED_FALLBACKS` holds nothing else, so pinning a second rule
+    has to break the build rather than quietly widen the copy.
+
+    Also asserts every pin is citable: a pinned value whose URL a reader cannot
+    open, or whose clause is empty, is the constant the docs promise it is not.
+    """
+    for platform, pinned in ps.PINNED_FALLBACKS.items():
+        assert set(pinned) == {"min_duration_s"}, (
+            f"{platform} pins {sorted(set(pinned) - {'min_duration_s'})}. "
+            "README, ARCHITECTURE.md and the app claim min_duration_s is the only "
+            "pinned rule. Widen the copy in all three or drop the pin."
+        )
+        for name, entry in pinned.items():
+            assert ps.is_citable_url(entry["url"]), f"{platform}/{name} pin has no citable URL"
+            assert entry["clause"].strip(), f"{platform}/{name} pin has no clause"
+            lo, hi = ps._BANDS[name]
+            assert lo <= entry["value"] <= hi, f"{platform}/{name} pin is outside its band"
+
+
+def test_a_pinned_threshold_is_never_labelled_live():
+    """A pin must reach the UI as `fallback`, never dressed as a live read.
+
+    The whole defence of the pin is the label. If `spec_from_ledger` ever marked a
+    pinned value `live`, the interface would print a citation for a page this run
+    never opened, which is the exact failure the evidence ledger exists to stop.
+    """
+    ps.ledger_clear()
+    url = "https://partnerhelp.netflixstudios.com/hc/en-us/articles/219375728"
+    ps.ledger_put(
+        {
+            "url": url,
+            "title": "Subtitle Templates",
+            "publish_date": None,
+            # States reading speed only, so min_duration_s must come from the pin.
+            "thresholds": {
+                "max_cps": {
+                    "value": 17.0,
+                    "clause": "Adult programs: Up to 17 characters per second",
+                    "url": url,
+                }
+            },
+            "found": ["max_cps"],
+            "extract_id": "extract_test",
+            "session_id": "session_test",
+            "chars_extracted": 4096,
+            "platform": "netflix_templates",
+        }
+    )
+    spec = ps.spec_from_ledger("netflix_templates", [url])
+    ps.ledger_clear()
+
+    assert spec["provenance"]["max_cps"] == "live"
+    assert spec["provenance"]["min_duration_s"] == "fallback"
+    pin = ps.PINNED_FALLBACKS["netflix_templates"]["min_duration_s"]
+    assert spec["min_duration_s"] == pin["value"]
+    evidence = spec["evidence"]["min_duration_s"]
+    assert evidence["clause"] == pin["clause"]
+    assert evidence["url"] == pin["url"]
+    assert evidence["url"] != url, "the pin must not borrow the extracted page's URL"

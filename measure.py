@@ -18,7 +18,12 @@ import math
 import re
 from dataclasses import asdict, dataclass, field
 
-# Default thresholds; overridden at runtime by the spec from parallel_spec.py
+# Unit-test defaults only. Every live call passes `spec=` from parallel_spec.py,
+# which always carries all four keys, so none of these four numbers is reachable
+# on the path a run takes. They exist so measurement and repair can be tested
+# with no Parallel key at all, and `measure_subtitles` labels the report
+# "Netflix (default)" / "... (default constants)" when they are used, so a report
+# built on them cannot be mistaken for a cited one.
 DEFAULT_MAX_CPS = 17.0
 DEFAULT_MIN_CUE_SECONDS = 5 / 6
 DEFAULT_MAX_LINE_CHARS = 42
@@ -121,6 +126,19 @@ class SubtitleReport:
         the buyer's page did not state, and cannot accidentally render it as a
         pass. `total_violations` still counts only real findings, so the arrow
         pair on screen is never inflated by an unmeasured rule.
+
+        THE COUNTERS ARE NOT ALL DISJOINT. `non_positive_duration_count` is a
+        SUBSET of `under_duration_count`, not a fifth category beside it: a cue
+        whose out-time is not after its in-time is also a cue under the minimum,
+        and it increments both. So the reconciliation is four terms, not five:
+
+            over_cps + under_duration + over_line_chars + over_line_count
+                == total_violations
+
+        Adding `non_positive_duration_count` to that sum double-counts those
+        cues. On the shipped run it turns 179 into 181. Use `total_violations`,
+        which is `len(findings)` and needs no addition at all, whenever a total
+        is what you want.
         """
         skipped = set(self.checks_skipped)
 
@@ -445,7 +463,7 @@ def explain_leftovers(
         # Millisecond comparison, matching measure_subtitles: a cue the repair
         # can bring to exactly the needed duration is cleared, and must not be
         # given a leftover reason by a float residue of 1e-14 seconds.
-        if True:
+        if int(round(reachable * 1000)) >= int(round(needed * 1000)):
             continue  # repair cleared this cue
 
         # Still short after extending as far as the next cue allows.

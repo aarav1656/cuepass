@@ -132,50 +132,16 @@ def load(run_id: str) -> dict | None:
     return None
 
 
-def latest() -> dict | None:
-    """The most recently measured run, which is what the page opens on."""
-    records = []
-    for path in _record_paths():
-        try:
-            records.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
-            continue
-    if not records:
-        return None
-    records.sort(key=lambda r: r.get("measured_at", ""), reverse=True)
-    return records[0]
-
-
-def index() -> list[dict]:
-    """One summary row per stored run, newest first."""
-    rows = []
-    for path in _record_paths():
-        try:
-            rec = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        buyers = rec.get("buyers", {})
-        rows.append(
-            {
-                "run_id": rec.get("run_id", path.stem),
-                "measured_at": rec.get("measured_at", ""),
-                "film_title": rec.get("film_title", ""),
-                "film_identifier": rec.get("film_identifier", ""),
-                "cue_count": rec.get("cue_count", 0),
-                "buyers": sorted(buyers),
-                "worst_before": max(
-                    (b.get("before", {}).get("total_violations", 0) for b in buyers.values()),
-                    default=0,
-                ),
-                "worst_after": max(
-                    (b.get("after", {}).get("total_violations", 0) for b in buyers.values()),
-                    default=0,
-                ),
-                "is_seed": path.parent == SEED_DIR,
-            }
-        )
-    rows.sort(key=lambda r: r["measured_at"], reverse=True)
-    return rows
+# There is deliberately only ONE way to list stored runs: `list_runs()`, ordered
+# worst first, with `default_run_id()` taking its first row.
+#
+# An earlier `index()` and `latest()` lived here and ordered by `measured_at`
+# instead, newest first. Nothing called either of them, which is exactly what made
+# them dangerous: two functions answering "which run leads" with different
+# answers, and the next reader picking whichever they found first. The page's rail
+# says "worst first", so a caller who reached for the newest-first version would
+# have made that heading a lie without touching the heading. Deleted rather than
+# kept as a convenience, because the convenience was a second source of truth.
 
 
 def repaired_path(name: str) -> Path | None:
@@ -252,6 +218,18 @@ def cue_table(record: dict, buyer: str) -> list[dict]:
     next to a failing one. `flags` is empty for a cue that meets every rule
     that buyer publishes. A rule the buyer does not publish never produces a
     flag, so a cue is never marked for a limit nobody set.
+
+    The flags come from `measure.measure_subtitles`, the same function that
+    produced the counts on screen. They are NOT recomputed here.
+
+    They used to be. This function had its own copy of all four threshold
+    comparisons, which made it a second answer to "does this cue violate?".
+    The two agreed on the day it was written and then `measure_subtitles` moved
+    to millisecond comparisons while this copy stayed on float seconds, so a cue
+    sitting exactly on a limit would have been flagged red on the sheet while the
+    total beside it counted the cue as clean. No cue in the current track sits on
+    a boundary, so nothing was visibly wrong; it was one repair away from being
+    a page that contradicted itself.
     """
     import measure as measure_mod
 
@@ -260,30 +238,25 @@ def cue_table(record: dict, buyer: str) -> list[dict]:
         return []
     entry = record.get("buyers", {}).get(buyer, {})
     spec = entry.get("spec", {})
-    max_cps = spec.get("max_cps")
-    min_duration_s = spec.get("min_duration_s")
-    max_line_chars = spec.get("max_line_chars")
-    max_lines = spec.get("max_lines")
     reasons = entry.get("leftover_reasons", {})
     editorial = record.get("editorial", {})
+
+    # One source of truth for what counts as a violation.
+    report = measure_mod.measure_subtitles(srt, spec=spec)
+    flags_by_cue: dict[int, list[str]] = {}
+    for finding in report.findings:
+        flags_by_cue.setdefault(finding.cue_index, []).append(finding.check)
 
     rows = []
     for idx, c in enumerate(measure_mod.parse_srt(srt), start=1):
         chars = len(c["text"].strip())
         duration = c["duration"]
-        cps = round(chars / duration, 2) if duration > 0 else None
+        # Displayed at the same precision the comparison uses, so the number a
+        # reader sees is the number that was actually tested.
+        duration_ms = int(round(duration * 1000))
+        cps = round(chars / (duration_ms / 1000), 2) if duration_ms > 0 else None
         longest = max((len(ln) for ln in c["lines"]), default=0)
-        flags = []
-        if min_duration_s is not None and duration <= 0:
-            flags.append("non_positive_duration")
-        elif min_duration_s is not None and duration < min_duration_s:
-            flags.append("min_duration")
-        elif max_cps is not None and cps is not None and cps > max_cps:
-            flags.append("reading_speed")
-        if max_line_chars is not None and longest > max_line_chars:
-            flags.append("line_length")
-        if max_lines is not None and len(c["lines"]) > max_lines:
-            flags.append("line_count")
+        flags = flags_by_cue.get(idx, [])
         key = str(idx)
         rows.append(
             {
@@ -352,8 +325,8 @@ def get_run(run_id: str) -> dict | None:
 
     `primary` is the buyer column that leads the page. `buyers` is the whole
     matrix: the same file against every buyer whose own published spec was
-    cited this run, which is the thing that could not exist if the thresholds
-    were hardcoded.
+    cited this run, which is the thing that could not exist if the reading speed
+    were a constant in this repository.
     """
     record = load(run_id)
     if record is None:
@@ -402,6 +375,10 @@ def get_run(run_id: str) -> dict | None:
             "under_min_duration": before.get("under_duration_count", 0),
             "over_line_chars": before.get("over_line_chars_count", 0),
             "over_max_lines": before.get("over_line_count", 0),
+            # A SUBSET of under_min_duration, not a fifth category beside it: a
+            # cue whose out-time is not after its in-time is also under the
+            # minimum and is counted in both. Never add this to the others.
+            # `violations` below is the authoritative total and needs no sum.
             "non_positive_duration": before.get("non_positive_duration_count", 0),
             "violations": before.get("total_violations", 0),
             "violations_after_repair": after.get("total_violations", 0),

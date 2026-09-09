@@ -46,7 +46,7 @@ function python() {
 // Python's own backslash escapes, and a regex like /\s+/ would arrive as a
 // literal backslash and quietly stop matching. That mismatch hid a real bug.
 const READ = `
-import json, app, runstore
+import inspect, json, app, runstore
 run_id = runstore.default_run_id()
 record = runstore.load(run_id) if run_id else None
 if record is None:
@@ -66,6 +66,16 @@ print(json.dumps({
     "looser_rows": run["buyers"][looser]["rows"] if looser else [],
     "specs": specs,
     "cue_count": run["cue_count"],
+    "row_src": inspect.getsource(app._full_text) + inspect.getsource(app._cue_rows),
+    "breakdowns": {k: v["totals"] for k, v in run["buyers"].items()},
+    "verdicts": {
+        k: {"verdict": v["verdict"], "violations_after": v["totals"]["violations_after"]}
+        for k, v in run["buyers"].items()
+    },
+    "index": [
+        {"run_id": r["run_id"], "violation_count": r["violation_count"]}
+        for r in runstore.list_runs()
+    ],
     "graph_nodes": [n["name"] for n in (run["graph"].get("nodes") or [])],
     "desk_total": len(run["buyers"]) + len(run["unavailable"]),
     "script": app.HTML,
@@ -341,22 +351,116 @@ Object.keys(payload.specs).forEach(function(key) {
   });
   // A borrowed threshold must cite a page, otherwise the row says the number is
   // not on this profile's page while offering nowhere to check it.
-  const borrowedBlind = rules.filter(function(r) {
+  const borrowed = rules.filter(function(r) {
     var e = spec.evidence[r];
-    return e && e.off_profile && !e.url;
+    return e && e.off_profile;
   });
+  const borrowedBlind = borrowed.filter(function(r) { return !spec.evidence[r].url; });
   check(key + ': every borrowed threshold links the page it came from',
     borrowedBlind.length === 0, 'blind: ' + borrowedBlind.join(', '));
-  // Every page a threshold cites has to be one the run says it opened.
+  // Richness guard, in the declared data-sanity category. The check above is
+  // vacuously green on a profile that borrows nothing, because an empty list has
+  // no blind entries. This asserts the borrowed case is present, so the check is
+  // known to be exercising it. Every profile on this record borrows at least the
+  // minimum duration, which is stated on a page neither profile leads with.
+  check(key + ': the profile borrows at least one threshold',
+    borrowed.length > 0,
+    'nothing borrowed, so the citation check above proves nothing');
+
+  // Every page a threshold cites has to be one the run says it opened. No
+  // `opened.size &&` escape here: an empty source list previously made this pass
+  // by construction, so dropping the list entirely looked like a clean bill of
+  // health. Now an empty list means every cited page is unlisted, which is red.
   const opened = new Set(spec.source_urls || []);
   const unlisted = rules
     .map(function(r) { return spec.evidence[r]; })
-    .filter(function(e) { return e && e.url && opened.size && !opened.has(e.url); });
+    .filter(function(e) { return e && e.url && !opened.has(e.url); });
   check(key + ': every cited page is one the run opened', unlisted.length === 0,
     'unlisted: ' + unlisted.map(function(e) { return e.url; }).join(', '));
+  check(key + ': the run recorded the pages it opened',
+    opened.size > 0, 'no source_urls, so the check above has nothing to compare against');
 });
 
-// 9. No user-facing sentence may state a count of desks, profiles or rules in
+// 9. The verdict word is computed in another module and printed as the headline
+// tag beside the numbers. If it ever disagrees with the count next to it, the
+// page contradicts itself: DELIVER against a non-zero total, or HOLD against a
+// clean one. The colour is derived from the count for that reason, and the word
+// itself is checked here rather than trusted.
+Object.keys(payload.verdicts).forEach(function(key) {
+  const v = payload.verdicts[key];
+  const clean = v.violations_after === 0;
+  check(key + ': the verdict word agrees with the count beside it',
+    (clean && v.verdict === 'DELIVER') || (!clean && v.verdict === 'HOLD'),
+    v.verdict + ' with ' + v.violations_after + ' still failing');
+});
+// Source-level, and labelled as such because it is weaker than a behavioural
+// check: a wrong verdict word is not something this run's data can produce, so
+// this holds the shipped code to deriving the colour rather than asserting on an
+// outcome it cannot generate.
+const railSrc = slice('function renderRail', '// The order the', 'renderRail');
+check('the rail tag is derived from the count, not from the verdict word',
+  /violations_after === 0 \? 'deliver' : 'hold'/.test(railSrc),
+  'tag appears to follow the word instead of the measurement');
+
+// Behavioural, on the real comparator. The store holds one run, so the ordering
+// the "worst first" heading claims cannot be observed from it; the comparator is
+// exercised directly instead. An earlier version of this grepped renderRail for
+// ".sort(" and was satisfied by the unrelated desk sort already in that
+// function: green while the stored-run sort was missing entirely.
+const worstFirst = new Function(
+  slice('function worstFirst', 'function citedCount', 'worstFirst')
+  + '\nreturn worstFirst;')();
+const shuffled = [
+  { run_id: 'mild-new', violation_count: 5, measured_at: '2026-09-09T10:00:00+00:00' },
+  { run_id: 'worst-old', violation_count: 90, measured_at: '2026-09-09T08:00:00+00:00' },
+  { run_id: 'tie-newer', violation_count: 90, measured_at: '2026-09-09T09:00:00+00:00' }
+];
+const ordered = shuffled.slice().sort(worstFirst).map(r => r.run_id);
+check('the worst run leads, not the newest',
+  ordered[0] === 'worst-old', 'got ' + ordered.join(', '));
+check('equal violation counts break to the older run, matching the store',
+  ordered.join(',') === 'worst-old,tie-newer,mild-new', 'got ' + ordered.join(', '));
+check('the heading only claims an order the renderer imposes',
+  /worst first/.test(railSrc) === /\.sort\(worstFirst\)/.test(railSrc),
+  'heading and sort disagree about whether the list is ordered');
+
+// 10. The breakdown row prints one figure per rule and a total. Those have to
+// reconcile, because a reader adds them up. The store's own counters are NOT
+// disjoint: under_duration_count already contains non_positive_duration_count,
+// so summing every counter overcounts by the number of zero-length cues. The
+// breakdown therefore prints the four rule figures only, and this asserts they
+// still add to the total beside them.
+Object.keys(payload.breakdowns).forEach(function(key) {
+  const t = payload.breakdowns[key];
+  const summed = t.over_cps + t.under_min_duration + t.over_line_chars + t.over_max_lines;
+  check(key + ': the breakdown adds up to the total printed beside it',
+    summed === t.violations,
+    summed + ' from the four rule figures vs ' + t.violations + ' printed as the total');
+  // Data-sanity guard, in the same category as the fixture-richness checks
+  // above: it fails only on a degraded fixture, and that is the point. The
+  // reconciliation is trivially satisfied when no cue is zero-length, because
+  // four terms then add up whether or not the nested counter is nested. This
+  // asserts the nested case is actually present, so the check above is known to
+  // be exercising it. An earlier version asserted non_positive <= under_min
+  // instead, which holds at 2 <= 42 when nested and at 2 <= 40 when disjoint:
+  // it named the invariant and tested nothing.
+  check(key + ': the fixture contains the nested zero-length case',
+    t.non_positive_duration > 0,
+    'no zero-length cue on this track, so the reconciliation above proves nothing '
+    + 'about the nesting it is there to check');
+});
+
+// 11. "Is this cue a violation" must have exactly one answer. The cue table and
+// the measurement each used to compute their own, they drifted when one moved to
+// millisecond comparisons, and a cue sitting on a limit would have been flagged
+// red in the row while the total beside it counted the track clean. The table is
+// read here for cue TEXT only; the flag and the value come from the findings. A
+// source guard because the risk is a future edit reaching for the nearer field.
+check('the sheet takes no violation flag from the cue table',
+  !/\bflags\b/.test(payload.row_src),
+  'row building references cue-table flags: a second answer to "is this a violation"');
+
+// 11. No user-facing sentence may state a count of desks, profiles or rules in
 // words. Those change with the run: the page said "four desks" for a week after
 // a fifth was added, which is a false claim printed next to true numbers. Counts
 // on screen have to be read off the record.

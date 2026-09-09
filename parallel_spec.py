@@ -1,21 +1,29 @@
 """Caption delivery specs, read off the buyer's own published page at runtime.
 
+One exception, stated up front and labelled in every result: `PINNED_FALLBACKS`
+at the bottom of this file. See the comment above it.
+
 Two Parallel surfaces, in a chain, both load-bearing:
 
   1. `client.search(...)`  finds candidate spec pages. Search is allowed to
      return URLs. Search is NOT allowed to produce a number: a snippet that
      says "17 characters per second" could have come from a 2019 blog post.
   2. `client.extract(urls=[...], session_id=...)`  pulls the actual page and
-     returns it as markdown. Every threshold Cuepass measures against is read
-     out of that extracted page text, and every threshold carries the verbatim
-     sentence it was read from plus the URL that sentence lives on.
+     returns it as markdown. Every threshold on the live path is read out of
+     that extracted page text, and every threshold Cuepass measures against,
+     live or pinned, carries the verbatim sentence that states it plus the URL
+     that sentence lives on.
 
 The `session_id` returned by Search is passed into Extract, which is how the
 Parallel SDK links the two calls as one piece of agent work.
 
 If Extract cannot produce a page that states a reading-speed rule, this module
-raises. There is no fallback to a constant. A number with no clause behind it
-is a rumour, and Cuepass would be citing a spec it never read.
+raises. Reading speed is never pinned. The only rule with a pinned fallback is
+the minimum on-screen duration, which neither Netflix profile's own page states:
+see `PINNED_FALLBACKS`, where the value carries the buyer page it is published on
+and that page's exact sentence, and comes back labelled `fallback` so every
+consumer can say so. A number with no clause behind it is never returned, because
+Cuepass would then be citing a spec it never read.
 
 No language model is ever asked what a threshold is. The model (see
 `cuepass_agents.py`) decides WHICH page is authoritative and when to try
@@ -47,7 +55,7 @@ class ParallelUnavailableError(Exception):
 
 # Where each buyer publishes its own spec. Used to rank candidates and to
 # reject a third-party summary standing in for the buyer's own page. These are
-# hosts, not thresholds: no number in this file is ever measured against.
+# hosts, not thresholds: nothing in this dict is ever measured against.
 OFFICIAL_HOSTS: dict[str, tuple[str, ...]] = {
     "netflix_en_us": ("partnerhelp.netflixstudios.com", "help.netflix.com", "netflix.com"),
     "netflix_templates": (

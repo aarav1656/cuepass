@@ -15,7 +15,9 @@ POST /run
     ->  measure, retime, re-measure         same check, twice
 ```
 
-Search is not allowed to produce a number. Extract opens the page. Thresholds are read from that text. If Parallel cannot produce a cited spec, the run raises. There is no hardcoded `MAX_CPS`.
+Search is not allowed to produce a number. Extract opens the page. Every threshold on the live path is read from that text. If Parallel cannot produce a cited spec, the run raises. There is no hardcoded `MAX_CPS`: reading speed is never pinned, for either Netflix profile.
+
+One rule has a pinned fallback, `min_duration_s`, because neither Netflix profile's own page states it and the desk does not always land on a page that does. It is `PINNED_FALLBACKS` in `parallel_spec.py`, carries the Netflix page it is published on and that page's exact sentence, and comes back with provenance `fallback`, which the interface prints beside the number.
 
 ## Where it is in code
 
