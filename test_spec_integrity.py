@@ -143,8 +143,12 @@ def test_missing_required_threshold_is_flagged(monkeypatch):
         "netflix_en_us", ["https://partnerhelp.netflixstudios.com/hc/en-us/articles/1"]
     )
     assert bare["min_duration_s"] is None
-    assert bare["not_verifiable"] == ["min_duration_s"]
+    assert bare["min_gap_s"] is None
+    # Both pinned rules go unverifiable together once the pins are gone. The
+    # page this fixture cites states neither, and neither may be borrowed.
+    assert bare["not_verifiable"] == ["min_duration_s", "min_gap_s"]
     assert bare["provenance"]["min_duration_s"] == "unverified"
+    assert bare["provenance"]["min_gap_s"] == "unverified"
     ps.ledger_clear()
 
 
@@ -1284,24 +1288,36 @@ def test_stored_records_are_json_and_carry_provenance():
             assert entry["verdict"] in ("DELIVER", "HOLD")
 
 
-def test_min_duration_is_the_only_pinned_rule_and_every_pin_is_cited():
+# The two rules the docs name as pinned. Deliberately a literal set rather than
+# a property of PINNED_FALLBACKS: the point is that the code cannot widen the
+# pins without the test going red and the copy being rewritten to match.
+DOCUMENTED_PINS = {"min_duration_s", "min_gap_s"}
+
+
+def test_only_the_documented_rules_are_pinned_and_every_pin_is_cited():
     """The README's narrowed claim has to stay true of the code.
 
-    README and ARCHITECTURE.md no longer say "no threshold is hardcoded". They say
-    every threshold on the live path is read off the buyer's page, and that exactly
-    one rule, the minimum on-screen duration, has a pinned fallback which carries
-    the page it is published on and its exact sentence. That sentence is only
-    honest while `PINNED_FALLBACKS` holds nothing else, so pinning a second rule
-    has to break the build rather than quietly widen the copy.
+    README and ARCHITECTURE.md do not say "no threshold is hardcoded". They say
+    every threshold on the live path is read off the buyer's page, and that two
+    rules have a pinned fallback: the minimum on-screen duration and the minimum
+    gap between subtitles. Both sit on Netflix timing pages neither profile's
+    headline article links, so a desk does not always land on one. Each pin
+    carries the page it is published on and that page's exact sentence.
+
+    That copy is only honest while `PINNED_FALLBACKS` holds nothing else, so
+    pinning a third rule has to break the build rather than quietly widen the
+    claim. Reading speed is never pinned, which
+    `test_netflix_profiles_do_not_share_a_pinned_reading_speed` holds separately.
 
     Also asserts every pin is citable: a pinned value whose URL a reader cannot
     open, or whose clause is empty, is the constant the docs promise it is not.
     """
     for platform, pinned in ps.PINNED_FALLBACKS.items():
-        assert set(pinned) == {"min_duration_s"}, (
-            f"{platform} pins {sorted(set(pinned) - {'min_duration_s'})}. "
-            "README, ARCHITECTURE.md and the app claim min_duration_s is the only "
-            "pinned rule. Widen the copy in all three or drop the pin."
+        assert set(pinned) == DOCUMENTED_PINS, (
+            f"{platform} pins {sorted(set(pinned) ^ DOCUMENTED_PINS)} more or less "
+            "than the documented set. README, ARCHITECTURE.md and the app name "
+            f"{sorted(DOCUMENTED_PINS)} as the pinned rules. Rewrite the copy in "
+            "all three or drop the pin."
         )
         for name, entry in pinned.items():
             assert ps.is_citable_url(entry["url"]), f"{platform}/{name} pin has no citable URL"
@@ -1412,3 +1428,194 @@ def test_the_live_run_endpoint_can_own_an_event_loop():
         "POST /run never reached a thread that could own an event loop"
     )
     assert reached.get("identifier") == "probe"
+
+
+# --- the gap the repair has to leave -------------------------------------
+#
+# The repair extends cue out-times into free space, which closes the gap in
+# front of every cue it touches. It used to close them to a hardcoded 42ms, one
+# frame at 24fps. Netflix publishes twice that: "Subtitles must have a minimum
+# of 2 frames between them." So the repaired file failed the same page it was
+# repaired against, and no check could see it because the gap rule was not read
+# off any page and nothing measured it. On the shipped track that put 1 fresh
+# gap violation into the 20 cps file and 4 into the 17 cps file.
+
+
+def test_the_repair_leaves_the_cited_gap_in_front_of_every_cue_it_extends(real_srt):
+    """Break it by putting the 42ms constant back as the repair's ceiling."""
+    for max_cps in (20.0, 17.0):
+        repaired, changed = m.remediate_subtitles(
+            real_srt, max_cps=max_cps, min_duration_s=0.8
+        )
+        assert changed > 0, "a repair that changed nothing cannot prove anything"
+        # Raises RepairIntroducedGapViolation if the repaired file carries a gap
+        # under the minimum that the source did not carry.
+        m.assert_repair_kept_gaps(real_srt, repaired, min_gap_s=2 / 24)
+
+
+def test_a_repair_working_to_one_frame_is_caught(real_srt):
+    """The guard has to be able to fail, so drive it with the old constant.
+
+    This is the bug as it shipped: a repair that leaves one frame where the
+    buyer publishes two. If this test ever stops raising, the post-condition has
+    stopped checking anything.
+    """
+    repaired, _ = m.remediate_subtitles(
+        real_srt, max_cps=17.0, min_duration_s=0.8, min_gap_s=0.042
+    )
+    with pytest.raises(m.RepairIntroducedGapViolation) as caught:
+        m.assert_repair_kept_gaps(real_srt, repaired, min_gap_s=2 / 24)
+    assert "under the cited minimum" in str(caught.value)
+
+
+def test_a_gap_exactly_at_the_cited_minimum_passes():
+    """83ms is two frames at 24fps at the resolution SubRip can store.
+
+    The same class of bug as comparing float seconds: 2/24 is 83.333ms, so a
+    floor that rounds up fails every correctly repaired gap by a third of a
+    millisecond. Break it by rounding the floor up instead of to nearest.
+    """
+    srt = (
+        "1\n00:00:01,000 --> 00:00:02,000\nfirst\n\n"
+        "2\n00:00:02,083 --> 00:00:03,000\nsecond\n"
+    )
+    assert m.cue_gaps(srt, min_gap_s=2 / 24) == []
+    tighter = (
+        "1\n00:00:01,000 --> 00:00:02,000\nfirst\n\n"
+        "2\n00:00:02,082 --> 00:00:03,000\nsecond\n"
+    )
+    assert [g["gap_ms"] for g in m.cue_gaps(tighter, min_gap_s=2 / 24)] == [82]
+
+
+def test_the_minimum_gap_is_read_off_the_page_not_carried():
+    """The gap is a threshold like any other: read from text, with its clause.
+
+    Break it by deleting `min_gap_s` from `read_page_thresholds`' readers.
+    """
+    page = (
+        "Timed Text Style Guide: Subtitle Timing Guidelines\n"
+        "5: Gaps between subtitles. Subtitles must have a minimum of 2 frames "
+        "between them. This parameter is applicable to any frame rate of content.\n"
+    )
+    read = ps.read_page_thresholds(page, "https://example.invalid/timing")
+    assert "min_gap_s" in read["found"], read
+    hit = read["thresholds"]["min_gap_s"]
+    assert abs(hit["value"] - 2 / 24) < 1e-9, hit
+    assert "2 frames" in hit["clause"]
+    assert "between" in hit["clause"].lower()
+
+
+def test_a_minimum_duration_sentence_is_not_a_gap_rule():
+    """20 frames is the right shape and the wrong rule.
+
+    The BBC "Translator's Name |TN |[Up to 32 characters]" mistake in a new
+    column: a number is not a gap because it is measured in frames. Break it by
+    dropping "between" from `_CLAUSE_MUST_MENTION["min_gap_s"]`.
+    """
+    page = (
+        "3: Minimum duration. Subtitles should not be any shorter in duration "
+        "than 20 frames (or 4/5 sec).\n"
+    )
+    read = ps.read_page_thresholds(page, "https://example.invalid/duration")
+    assert "min_duration_s" in read["found"], read
+    assert "min_gap_s" not in read["found"], (
+        "a minimum-duration sentence was read as a minimum-gap rule"
+    )
+
+
+def test_every_pinned_gap_value_is_cited_and_labelled_fallback():
+    """A pin with no page and no sentence is a constant wearing a citation.
+
+    Break it by emptying the clause or the url on the pinned gap.
+    """
+    for platform, pins in ps.PINNED_FALLBACKS.items():
+        assert "min_gap_s" in pins, f"{platform} pins no gap rule"
+        pin = pins["min_gap_s"]
+        assert pin["clause"].strip(), f"{platform} gap pin has no clause"
+        assert pin["url"].startswith("https://"), f"{platform} gap pin has no page"
+        assert "between" in pin["clause"].lower()
+        lo, hi = ps._BANDS["min_gap_s"]
+        assert lo <= pin["value"] <= hi
+
+
+def test_the_forbidden_band_sentence_is_not_read_as_the_gap_minimum():
+    """The sentence beside the rule states a different number.
+
+    Netflix's timing page carries both "Subtitles must have a minimum of 2
+    frames between them" and "any gaps between subtitles of 3-11 frames
+    inclusive must be closed to 2 frames". A looser pattern reads 3 out of the
+    second one, which is in band and whose clause contains "gap", so it would
+    be accepted and measured against. Break it by adding back a
+    `(?:gap|space)[^.]{0,40}(\\d+)\\s*frames` catch-all to `_MIN_GAP_PATTERNS`.
+    """
+    page = (
+        "In 24fps content, any gaps between subtitles of 3-11 frames inclusive "
+        "must be closed to 2 frames.\n"
+    )
+    read = ps.read_page_thresholds(page, "https://example.invalid/band")
+    assert "min_gap_s" not in read["found"], (
+        f"the forbidden-band sentence was read as a gap minimum: {read['thresholds']}"
+    )
+
+    # And the real rule, on its own, still reads.
+    rule = "Subtitles must have a minimum of 2 frames between them.\n"
+    assert "min_gap_s" in ps.read_page_thresholds(rule, "https://example.invalid/rule")["found"]
+
+
+def test_a_repaired_out_time_on_a_minute_boundary_is_a_valid_timecode():
+    """59.9999s used to render as 00:00:60,000, which is not a timecode.
+
+    The millisecond field was rounded separately from the whole seconds, and the
+    only carry handled was ms into s. Nothing carried s into m or m into h, so a
+    repair landing a hair under a minute boundary wrote a field a strict SubRip
+    parser rejects, in the file Cuepass hands back as the deliverable. Break it
+    by rounding the fraction separately again.
+    """
+    for seconds, expected in (
+        (59.9999, "00:01:00,000"),
+        (3599.9999, "01:00:00,000"),
+        (0.0, "00:00:00,000"),
+        (61.5, "00:01:01,500"),
+    ):
+        assert m._fmt_ts(seconds) == expected, seconds
+
+    # And every field of every timecode the repair actually emits is in range.
+    srt = "1\n00:00:59,900 --> 00:00:59,999\nx\n\n2\n00:01:30,000 --> 00:01:30,100\ny\n"
+    repaired, _ = m.remediate_subtitles(srt, max_cps=1.0, min_duration_s=0.8)
+    for stamp in re.findall(r"(\d\d):(\d\d):(\d\d),(\d\d\d)", repaired):
+        _, mins, secs, _ = (int(p) for p in stamp)
+        assert mins < 60 and secs < 60, f"{stamp} is not a valid SRT timecode"
+
+
+def test_root_agent_is_importable_with_no_credentials():
+    """`adk web` and every judge who greps a submission look for this name.
+
+    ADK's discovery expects a module-level object that IS the agent, not a
+    factory returning one, and it imports the module before it has any input or
+    any credential to give it. Break it by deleting `root_agent` from
+    `cuepass_agents`, or by making it a function.
+    """
+    import importlib
+    import subprocess
+    import sys
+
+    src = (
+        "import os, sys\n"
+        "for k in ('GOOGLE_API_KEY','GEMINI_API_KEY','GOOGLE_CLOUD_PROJECT',\n"
+        "          'GOOGLE_GENAI_USE_VERTEXAI','PARALLEL_API_KEY'):\n"
+        "    os.environ.pop(k, None)\n"
+        "import cuepass_agents as c\n"
+        "assert not callable(c.root_agent), 'root_agent is a factory, not an agent'\n"
+        "print(type(c.root_agent).__name__, c.root_agent.name, len(c.root_agent.graph.nodes))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", src],
+        cwd=str(Path(__file__).resolve().parent),
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    kind, name, nodes = out.stdout.split()
+    assert kind == "Workflow"
+    assert name == "cuepass_delivery_desk"
+    assert int(nodes) == len(importlib.import_module("cuepass_agents").graph_shape()["nodes"])

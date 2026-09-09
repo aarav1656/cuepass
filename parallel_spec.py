@@ -186,6 +186,29 @@ _MAX_LINES_PATTERNS = [
 _MIN_DURATION_FRACTION = re.compile(
     r"(\d)\s*/\s*(\d)\s*(?:of\s+a\s+)?(?:second|sec)\b", re.I
 )
+# The minimum gap between one subtitle's out-time and the next one's in-time.
+# It is published in frames rather than seconds, and it is a delivery rule the
+# repair itself has to obey: retiming a cue longer closes the gap in front of
+# it, so a repair that ignores this rule hands back a file that fails the page
+# it was repaired against.
+_MIN_GAP_PATTERNS = [
+    re.compile(
+        r"minimum\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*(frames?|seconds?|ms)\b[^.\n]{0,60}?between",
+        re.I,
+    ),
+    re.compile(
+        r"(?:gaps?\s+between|between)[^.\n]{0,60}?minimum\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*(frames?|seconds?|ms)\b",
+        re.I,
+    ),
+]
+# There is deliberately no looser third pattern. A `(?:gap|space) ... (\d+)
+# frames` catch-all matches the sentence right beside the rule on the page
+# Cuepass actually cites: "any gaps between subtitles of 3-11 frames inclusive
+# must be closed to 2 frames" yields 3, which is inside the band and whose
+# clause contains "gap", so it would be accepted and silently measured against.
+# Both patterns above require "minimum" adjacent to "between", which is what
+# the rule itself says.
+
 _MIN_DURATION_PATTERNS = [
     re.compile(
         r"minimum[^.\n]{0,40}?duration[^.\n]{0,60}?(\d+(?:\.\d+)?)\s*(seconds?|secs?|frames?|ms)",
@@ -205,6 +228,9 @@ _BANDS = {
     "max_line_chars": (20.0, 100.0),
     "max_lines": (1.0, 6.0),
     "min_duration_s": (0.2, 5.0),
+    # Two frames at 24fps is 0.083s. A gap rule wider than a second is not a
+    # gap rule, it is a shot-change or a maximum-duration sentence misread.
+    "min_gap_s": (0.02, 1.0),
 }
 
 # A number is not a rule just because it is the right size. The sentence it was
@@ -218,6 +244,11 @@ _CLAUSE_MUST_MENTION = {
     "max_line_chars": ("line",),
     "max_lines": ("line",),
     "min_duration_s": ("duration", "frame", "second", "on screen", "on-screen"),
+    # The sentence has to be about the space BETWEEN subtitles. "20 frames
+    # minimum duration" is the right shape and the wrong rule, and measuring a
+    # gap against it would be the BBC "Translator's Name |TN |[Up to 32
+    # characters]" mistake again in a different column.
+    "min_gap_s": ("between", "gap"),
 }
 
 # Words that mean the sentence is about something other than the subtitle text
@@ -292,6 +323,28 @@ def _read_min_duration(text: str) -> tuple[float, str] | None:
     return None
 
 
+def _read_min_gap(text: str) -> tuple[float, str] | None:
+    """Minimum gap between consecutive subtitles, normalised to seconds.
+
+    Published in frames on every guide that publishes it at all, so frames are
+    the common case. 24fps, the rate the rest of this module already converts
+    at and the rate the guides are written for.
+    """
+    for pat in _MIN_GAP_PATTERNS:
+        for m in pat.finditer(text):
+            clause = _sentence_around(text, m.start(), m.end())
+            if not _clause_is_about("min_gap_s", clause):
+                continue
+            value = float(m.group(1))
+            unit = (m.group(2) if m.lastindex and m.lastindex >= 2 else "frames").lower()
+            if unit.startswith("frame"):
+                value = value / 24.0
+            elif unit == "ms":
+                value = value / 1000.0
+            return value, clause
+    return None
+
+
 def read_page_thresholds(page_text: str, url: str) -> dict:
     """Read caption thresholds out of one extracted page. Pure Python.
 
@@ -305,6 +358,7 @@ def read_page_thresholds(page_text: str, url: str) -> dict:
         "max_line_chars": lambda: _first_hit(text, _LINE_CHARS_PATTERNS, "max_line_chars"),
         "max_lines": lambda: _first_hit(text, _MAX_LINES_PATTERNS, "max_lines"),
         "min_duration_s": lambda: _read_min_duration(text),
+        "min_gap_s": lambda: _read_min_gap(text),
     }
     out: dict[str, dict] = {}
     for name, reader in readers.items():
@@ -532,7 +586,17 @@ def extract_spec_page(platform: str, url: str, session_id: str = "") -> dict:
     }
 
 
-THRESHOLD_NAMES = ("max_cps", "min_duration_s", "max_line_chars", "max_lines")
+THRESHOLD_NAMES = (
+    "max_cps",
+    "min_duration_s",
+    "max_line_chars",
+    "max_lines",
+    # The gap between subtitles. It is here because it constrains the repair
+    # rather than only the source: extending a cue's out-time closes the gap in
+    # front of it, so a repair working to an uncited gap can hand back a file
+    # that fails the same page it was repaired against.
+    "min_gap_s",
+)
 
 # A published value, with the page it is published on, used ONLY to fill a gap
 # the live fetch left, and always labelled `fallback` in the result so the UI
@@ -569,9 +633,30 @@ _NETFLIX_MIN_DURATION_FALLBACK = {
     }
 }
 
+# The second and last pinned rule, and pinned for the same reason as the first:
+# neither Netflix profile's headline page states it, it lives on the timing
+# guidelines page, and the desk does not always land there. Read back through
+# Parallel Extract on 2026-09-09 from article 360051554394, which states it
+# three times: "Subtitles must have a minimum of 2 frames between them", "The
+# minimum frame gap remains as 2 frames for all frame rates", and "In 24fps
+# content, any gaps between subtitles of 3-11 frames inclusive must be closed to
+# 2 frames." Two frames at 24fps is 1/12 of a second.
+_NETFLIX_MIN_GAP_FALLBACK = {
+    "min_gap_s": {
+        "value": 2 / 24,
+        "clause": "Subtitles must have a minimum of 2 frames between them.",
+        "url": (
+            "https://partnerhelp.netflixstudios.com/hc/en-us/articles/"
+            "360051554394-Timed-Text-Style-Guide-Subtitle-Timing-Guidelines"
+        ),
+    }
+}
+
+_NETFLIX_PINNED = {**_NETFLIX_MIN_DURATION_FALLBACK, **_NETFLIX_MIN_GAP_FALLBACK}
+
 PINNED_FALLBACKS: dict[str, dict[str, dict]] = {
-    "netflix_en_us": _NETFLIX_MIN_DURATION_FALLBACK,
-    "netflix_templates": _NETFLIX_MIN_DURATION_FALLBACK,
+    "netflix_en_us": _NETFLIX_PINNED,
+    "netflix_templates": _NETFLIX_PINNED,
 }
 
 

@@ -28,6 +28,12 @@ DEFAULT_MAX_CPS = 17.0
 DEFAULT_MIN_CUE_SECONDS = 5 / 6
 DEFAULT_MAX_LINE_CHARS = 42
 DEFAULT_MAX_LINES = 2
+# The gap the repair must leave between one cue's out-time and the next cue's
+# in-time. This is a delivery rule in its own right, not a rounding convenience.
+# Netflix publishes it: "Subtitles must have a minimum of 2 frames between
+# them." A repair that closes a gap tighter than that hands back a file which
+# fails the same page it was repaired against. Two frames at 24fps.
+DEFAULT_MIN_GAP_SECONDS = 2 / 24
 
 # SRT timestamp pattern; accepts 2- or 3-digit milliseconds
 _TS = re.compile(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)")
@@ -350,11 +356,22 @@ def remediate_subtitles(
     text: str,
     max_cps: float = DEFAULT_MAX_CPS,
     min_duration_s: float = DEFAULT_MIN_CUE_SECONDS,
+    min_gap_s: float = DEFAULT_MIN_GAP_SECONDS,
 ) -> tuple[str, int]:
     """Extend cue out-times so reading speed and minimum duration are met.
 
     Repair strategy: extend the end-time of each cue into free space.
-    Never shorten a cue, never create overlaps, leave a 1-frame gap (~42ms at 24fps).
+    Never shorten a cue, never create overlaps, and leave at least `min_gap_s`
+    before the next cue's in-time.
+
+    `min_gap_s` is the buyer's own published minimum gap between subtitles,
+    read off the buyer's page this run like every other threshold. It used to
+    be a hardcoded 42ms, one frame at 24fps, which is half what Netflix
+    publishes: "Subtitles must have a minimum of 2 frames between them." The
+    repair was therefore closing gaps to a width the same guide rejects, and
+    the re-measure could not see it because there was no gap check. A repaired
+    file that fails the page it was repaired against is worse than no repair,
+    because it carries a verdict saying it improved.
 
     Returns: (corrected_srt_text, number_of_cues_changed)
     """
@@ -375,11 +392,11 @@ def remediate_subtitles(
         needed = math.ceil(needed * 1000) / 1000
         if c["duration"] >= needed:
             continue
-        # Do not run into the next cue; leave ~42ms gap (1 frame at 24fps).
-        # Clamp to the cue's own end so an already-overlapping source cue is never
-        # extended further.
+        # Do not run into the next cue, and leave the buyer's published minimum
+        # gap in front of it. Clamp to the cue's own end so an already-overlapping
+        # source cue is never extended further.
         ceiling = (
-            cues[i + 1]["start"] - 0.042 if i + 1 < len(cues) else c["start"] + needed
+            cues[i + 1]["start"] - min_gap_s if i + 1 < len(cues) else c["start"] + needed
         )
         new_end = min(c["start"] + needed, ceiling)
         if new_end > c["end"]:
@@ -391,15 +408,18 @@ def remediate_subtitles(
 
 
 def _fmt_ts(t: float) -> str:
-    if t < 0:
-        t = 0.0
-    h = int(t // 3600)
-    m = int((t % 3600) // 60)
-    s = int(t % 60)
-    ms = int(round((t - int(t)) * 1000))
-    if ms == 1000:
-        s, ms = s + 1, 0
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+    """Seconds to an SRT timecode.
+
+    Quantise to milliseconds first, then decompose. Rounding the fraction
+    separately from the whole seconds carried 59.9999 to "00:00:60,000" and
+    3599.9999 to "00:59:60,000": the special case rolled milliseconds into
+    seconds, but nothing rolled seconds into minutes or minutes into hours, so
+    the repaired file could carry a timecode a strict parser rejects. Deriving
+    every field from one integer millisecond count removes the case entirely.
+    """
+    total_ms = int(round(max(t, 0.0) * 1000))
+    total_s, ms = divmod(total_ms, 1000)
+    return f"{total_s // 3600:02d}:{total_s // 60 % 60:02d}:{total_s % 60:02d},{ms:03d}"
 
 
 def _render_srt(cues: list[dict]) -> str:
@@ -410,6 +430,81 @@ def _render_srt(cues: list[dict]) -> str:
             + "\n".join(c["lines"])
         )
     return "\n\n".join(parts) + "\n"
+
+
+def cue_gaps(text: str, min_gap_s: float = DEFAULT_MIN_GAP_SECONDS) -> list[dict]:
+    """Every consecutive pair whose gap is under the buyer's published minimum.
+
+    Cues are ordered by time first, because "the next cue" only means anything
+    in time order and a real ASR track is not always chronological.
+
+    Compared in integer milliseconds, which is all SRT stores, for the same
+    reason the duration check is: a gap set to exactly the minimum must not
+    fail it by one part in 10^14.
+
+    The floor rounds to nearest rather than up, because the rule is published in
+    frames and SubRip cannot hold it. Two frames at 24fps is 83.333ms; the
+    nearest value the format can store is 83ms, and that is what a
+    frame-accurate two-frame gap becomes the moment it is written to SRT.
+    Rounding up would fail every correctly repaired gap by a third of a
+    millisecond, the same class of fault as comparing float seconds.
+    """
+    cues = sorted(parse_srt(text), key=lambda c: (c["start"], c["end"]))
+    floor_ms = int(round(min_gap_s * 1000))
+    out = []
+    for i, (a, b) in enumerate(zip(cues, cues[1:]), start=1):
+        gap_ms = int(round((b["start"] - a["end"]) * 1000))
+        if gap_ms < floor_ms:
+            out.append(
+                {
+                    "after_cue": i,
+                    "gap_ms": gap_ms,
+                    "floor_ms": floor_ms,
+                    "timecode": f"{_fmt_ts(a['end'])} --> {_fmt_ts(b['start'])}",
+                }
+            )
+    return out
+
+
+class RepairIntroducedGapViolation(Exception):
+    """The repaired file breaks a gap rule the source did not break.
+
+    Raised rather than reported, because it means the repair handed back a file
+    that fails the buyer's own page. A run may not carry a verdict saying it
+    improved a track it made undeliverable.
+    """
+
+
+def assert_repair_kept_gaps(
+    source_text: str,
+    repaired_text: str,
+    min_gap_s: float = DEFAULT_MIN_GAP_SECONDS,
+) -> list[dict]:
+    """Post-condition on the repair: it may not narrow a gap below the minimum.
+
+    A source file can arrive with gaps under the buyer's minimum, and retiming
+    out-times cannot open those: extending a cue only closes the gap in front
+    of it. Those are the source's defect and belong in the exceptions file.
+    What the repair is not allowed to do is create the defect, or make an
+    existing one narrower. That is what this asserts, by comparing the same
+    pair in both files.
+
+    Returns the pairs already under the minimum in the source, which the caller
+    reports as a source defect. Raises if the repair introduced or worsened one.
+    """
+    before = {g["after_cue"]: g["gap_ms"] for g in cue_gaps(source_text, min_gap_s)}
+    after = cue_gaps(repaired_text, min_gap_s)
+    introduced = [
+        g for g in after if g["after_cue"] not in before or g["gap_ms"] < before[g["after_cue"]]
+    ]
+    if introduced:
+        first = introduced[0]
+        raise RepairIntroducedGapViolation(
+            f"the repair left {len(introduced)} gap(s) under the cited minimum of "
+            f"{first['floor_ms']}ms that the source did not have; first after cue "
+            f"{first['after_cue']} at {first['gap_ms']}ms ({first['timecode']})"
+        )
+    return after
 
 
 # --- why a leftover cue is still red -------------------------------------
@@ -425,6 +520,7 @@ def explain_leftovers(
     min_duration_s: float = DEFAULT_MIN_CUE_SECONDS,
     max_line_chars: int = DEFAULT_MAX_LINE_CHARS,
     max_lines: int = DEFAULT_MAX_LINES,
+    min_gap_s: float = DEFAULT_MIN_GAP_SECONDS,
 ) -> dict[int, str]:
     """Say why each cue that repair could not clear is still failing.
 
@@ -448,7 +544,7 @@ def explain_leftovers(
         needed = math.ceil(needed * 1000) / 1000
 
         ceiling = (
-            cues[i + 1]["start"] - 0.042 if i + 1 < len(cues) else c["start"] + needed
+            cues[i + 1]["start"] - min_gap_s if i + 1 < len(cues) else c["start"] + needed
         )
         reachable = max(min(c["start"] + needed, ceiling), c["end"]) - c["start"]
 
