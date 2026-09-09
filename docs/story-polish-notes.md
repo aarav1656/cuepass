@@ -1,23 +1,39 @@
-# Cuepass
+# Cuepass story polish notes
 
-The Devpost submission text, field by field. Every number carries the command or the URL that produced it.
+Scored 2026-09-10. Parallel Search + Extract must read load-bearing. No em dashes.
 
----
+## Scores (1-10)
 
-## 1. Project name
+| Axis | Score | Note |
+|---|---|---|
+| Uniqueness | 9 | Profile contrast (61 cues between two Netflix pages) cannot exist in a hardcoded-threshold tool. Empty lane vs Search-snippet briefs. |
+| Judge-clarity | 8 | Shape block now opens with Priya, hardcoded MAX_CPS incumbent, Parallel Search+Extract, 61, no text rewrite. |
+| Partner-load-bearing proof | 9 | ParallelUnavailableError with no cached-constants mode; Search≠threshold; Extract+session_id; extract_id on page. Strengthened header spelling Search then Extract. |
+| Demo-hook | 9 | Frame of cue 0070 at 17.83 cps; live POST /run; curl evidence. |
 
-Cuepass
+**Composite ~8.75.**
 
-## 2. Elevator pitch
+## Top 5 concrete edits (weak lines quoted)
 
-> Netflix publishes 20 characters per second on one page and 17 on another. Cuepass reads both live and shows the 61 cues of The Iron Mask that clear one page and fail the other.
+1. **ABOUT OPENED ON A TABLE, NOT A STORY (applied):** Was: "Netflix publishes two adult reading-speed limits on two current pages..." Now preceded by shape block with Priya / hardcoded QC / Parallel Search+Extract / 61 / honest limit.
+2. **INSPIRATION REPEATED THE INCIDENT WITHOUT THE USER (applied):** Was: "A distributor delivers a finished restoration..." Now: "The frustrating part for Priya..."
+3. **PARALLEL HEADER UNDER-SOLD SEARCH+EXTRACT (applied):** Was: "**Parallel: two surfaces, and the split between them is load-bearing.**" Now: "**Parallel Search then Parallel Extract: both load-bearing...**" plus explicit refusal of Search-only brief shape.
+4. **KEEP:** SpecChoice schema with no numeric field; unmeasured checks as None.
+5. **DEFER:** BBC/Amazon/FCC desks returning no citable spec is honest but a judge may skim past; keep the reasons visible in demo.
 
-**176 characters**, against Devpost's 200 limit.
+## Edits applied this pass
 
-```bash
-printf '%s' "Netflix publishes 20 characters per second on one page and 17 on another. Cuepass reads both live and shows the 61 cues of The Iron Mask that clear one page and fail the other." | wc -c
-#      176
-```
+3 surgical edits in `projects/sixteen-seventeen/docs/STORY.md`.
+
+## Residual risks
+
+- Parallel Extract nondeterminism (already disclosed).
+- Public-domain ASR tracks, not modern IMSC/TTML packages.
+
+## Devpost paste
+
+```markdown
+**Elevator pitch:** Netflix publishes 20 characters per second on one page and 17 on another. Cuepass reads both live and shows the 61 cues of The Iron Mask that clear one page and fail the other.
 
 ## 3. About the project
 
@@ -361,28 +377,4 @@ IMSC and TTML alongside SubRip, since that is what a modern delivery package act
 ## 4. Built with
 
 `google-adk` 2.8.0, `google.adk.workflow.Workflow`, `LlmAgent`, `FunctionNode`, `JoinNode`, `FunctionTool`, `InMemoryRunner`, Gemini 2.5 Flash, `google-genai` 2.22.0, Parallel Search API, Parallel Extract API, `parallel-web` 1.3.3, Python 3.12, FastAPI, Uvicorn, Pydantic, ffmpeg, archive.org, Google Cloud Run, pytest
-
-## 5. Links
-
-| | |
-|---|---|
-| Hosted | https://sixteen-seventeen-387894104564.us-central1.run.app |
-| Repository | https://github.com/aarav1656/sixteen-seventeen |
-| Licence | MIT |
-| Partner track | Parallel, Search then Extract |
-
----
-
-## Evidence index
-
-Every figure above traces to one of these.
-
-| Claim | How to check it |
-|---|---|
-| 20 cps on article `217350977`, 17 cps on `219375728`, both current | the `curl ... \| grep -oE "Adult programs: Up to [0-9]+ characters per second"` loop under "About the project" |
-| 88 timing failures at 20 cps, 149 at 17, 61 cues in the gap | the `python - <<'PY'` block under "What it does" |
-| 6 LlmAgent, 5 FunctionNode, 1 JoinNode, 13 nodes, gemini-2.5-flash | `python -c "import collections, cuepass_agents; ..."` under "How we built it" |
-| The service is up and both engines are reachable | `curl -s https://sixteen-seventeen-387894104564.us-central1.run.app/health` |
-| A live run reaches Parallel and Gemini end to end | `curl -s -X POST .../run -F identifier=isle_of_destiny` |
-| The frame is cut from the real film at that cue's in-time | `curl -s -o cue.jpg .../frame/iron_mask-69b5d4cf/netflix_templates/70.jpg` |
-| Test tally and the reason for the skip | `pytest tests.py test_spec_integrity.py test_real_data.py -q -rs` |
+```
