@@ -14,6 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+ARG CACHEBUST=1788986095
+RUN echo "cachebust=${CACHEBUST}"
+
+ARG CUEPASS_BUST=20260910020455
+RUN echo cuepass_bust=$CUEPASS_BUST
 COPY *.py ./
 
 # The pre-measured run the page opens on, and the fixture track. Without these
@@ -29,4 +34,6 @@ EXPOSE 8080
 
 CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
 
-# bust 20260910015302
+
+
+# bust 20260910020455
