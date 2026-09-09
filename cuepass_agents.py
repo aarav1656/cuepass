@@ -79,7 +79,12 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 # distributor asking "are we compliant with Netflix" gets a different answer
 # depending on which published page it is held to. That is the thing worth
 # showing, so each profile gets its own desk, its own cited page and its own
-# clause, and the two are never allowed to share a threshold.
+# clause, and none of them is ever allowed to borrow another's reading speed:
+# `parallel_spec.PINNED_FALLBACKS` holds no `max_cps` for any profile, so the
+# contrast on screen is what the pages said rather than what this file arranged.
+# The one pinned value, `min_duration_s`, is deliberately shared by both Netflix
+# profiles, because it is one published Netflix rule that neither profile page
+# restates, and it is labelled `fallback` wherever it appears.
 BUYERS: tuple[str, ...] = (
     "netflix_en_us",
     "netflix_templates",
@@ -289,11 +294,13 @@ def bind_cited_specs(ctx) -> dict:
 
 
 def effective_thresholds(spec: dict) -> dict:
-    """Only the thresholds this buyer's page actually stated.
+    """Only the thresholds this buyer's spec actually resolved to a value.
 
     A page that never mentions a line-length rule does not get one. The check
     is skipped for that buyer and the matrix says so, which is the honest
-    reading of a spec that is silent.
+    reading of a spec that is silent. A threshold whose provenance is `fallback`
+    does have a value and is measured against; it is the profile's own page that
+    was silent, not the buyer, and the label travels with the number.
     """
     return {
         k: spec[k]

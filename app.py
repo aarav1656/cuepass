@@ -1457,7 +1457,10 @@ function renderRail(state) {
     desks.forEach(function(k) {
       var e = run.buyers[k];
       var on = k === state.buyer;
-      var tag = e.verdict === 'DELIVER' ? 'deliver' : 'hold';
+      // The colour follows the measurement, not the word. A verdict computed
+      // elsewhere could say DELIVER beside a non-zero count, and green next to
+      // a failing number is the one contradiction a judge cannot miss.
+      var tag = e.totals.violations_after === 0 ? 'deliver' : 'hold';
       html += '<button class="rail-row' + (on ? ' on' : '') + '" type="button" data-buyer="' + esc(k) + '"'
         + ' aria-pressed="' + (on ? 'true' : 'false') + '">'
         + '<span class="rr-top"><span class="rr-name">' + esc(e.platform) + '</span>'
@@ -1480,7 +1483,10 @@ function renderRail(state) {
 
   if (state.index && state.index.length) {
     html += '<div class="rail-group"><div class="rail-head">Stored runs, worst first</div>';
-    state.index.forEach(function(r) {
+    // Sorted here so the heading is true by construction. The order arrives from
+    // the store, and a label that asserts a property of somebody else's ordering
+    // is a claim that goes stale the moment that sort is touched.
+    state.index.slice().sort(worstFirst).forEach(function(r) {
       var on = !!(run && r.run_id === run.run_id);
       html += '<button class="rail-row' + (on ? ' on' : '') + '" type="button" data-run="' + esc(r.run_id) + '"'
         + ' aria-pressed="' + (on ? 'true' : 'false') + '">'
@@ -1495,6 +1501,17 @@ function renderRail(state) {
     html += '</div>';
   }
   rail.innerHTML = html;
+}
+
+// The order the "worst first" heading claims: most violations first, and among
+// equal counts the older run first. Matches runstore.list_runs, which sorts on
+// (-violation_count, measured_at), so the edge sort cannot reorder a tie away
+// from the store's own answer about which run leads. Named rather than inline so
+// a test can exercise the tie rather than grep the source for a sort.
+function worstFirst(a, b) {
+  var byCount = (b.violation_count || 0) - (a.violation_count || 0);
+  if (byCount !== 0) return byCount;
+  return String(a.measured_at || '').localeCompare(String(b.measured_at || ''));
 }
 
 function citedCount(spec) {

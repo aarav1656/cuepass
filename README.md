@@ -40,9 +40,18 @@ units, and some publish no machine-readable rule at all. A tool with
 nothing in its output tells you it is measuring against a number somebody typed in
 2019.
 
-So Cuepass never hardcodes a threshold. Every number it measures against is read
-out of a page it opened during that run, and travels with the verbatim sentence
-on that page that states it.
+So Cuepass goes and reads the figure instead of carrying one. Every threshold on
+the live path is read out of a page Parallel Extract opened during that run, and
+every threshold travels with the verbatim sentence that states it and the URL
+that sentence lives on. Where a rule is not published on the profile's own page,
+the value is pinned to the buyer's page that does state it, labelled `fallback`
+everywhere it appears and linked to that page.
+
+Exactly one rule has a pinned fallback, the minimum on-screen duration, and
+reading speed is never pinned for either Netflix profile. That is why the
+contrast below is a live-fetch result rather than an artefact of this repository,
+and `test_netflix_profiles_do_not_share_a_pinned_reading_speed` fails the build
+if anyone changes it.
 
 ---
 
@@ -93,9 +102,9 @@ Search output as a menu of pages, nothing more.
 
 **Extract opens the page.** `client.extract(urls=[...], session_id=...)` pulls the
 actual page as markdown, carrying the `session_id` Search returned so the two calls
-are one piece of agent work. Every threshold is read from that extracted text by
-`parallel_spec.read_page_thresholds`, in Python, and keeps the sentence it was read
-from.
+are one piece of agent work. Every threshold on the live path is read from that
+extracted text by `parallel_spec.read_page_thresholds`, in Python, and keeps the
+sentence it was read from.
 
 **A model never authors a threshold.** The desks decide which page is authoritative
 and which candidate to open next when a page turns out not to state a rule. That is
@@ -170,9 +179,12 @@ citation, and why the interface links each number to the page behind it rather
 than to one page for the whole spec.
 
 The pinned-fallback mechanism exists for when that does not work, and it did not
-fire on this run. When it does fire the value is labelled `fallback` everywhere it
-appears, carries the URL and exact sentence of the page it is published on, and is
-never silently a constant. Reading speed is never pinned for either profile.
+fire on this run. It covers one rule, `min_duration_s`, because neither Netflix
+profile's own page states it and the desk does not always land on a page that
+does. When it fires the value is labelled `fallback` everywhere it appears,
+carries the URL and exact sentence of the page it is published on, and is never
+silently a constant. Reading speed is never pinned for either profile. The pinned
+values are `PINNED_FALLBACKS` in `parallel_spec.py`; there is nothing else.
 
 Amazon, BBC and the FCC are shown as **no citable spec page**, with the reason
 their desk gave, including the URLs it tried. That is not a bug being hidden. The
@@ -214,38 +226,61 @@ or off one of the others.
 ## Real numbers
 
 Film: **The Iron Mask** (1929), archive.org `iron_mask`, 516 cues, subtitle track
-`iron_mask.asr.srt`. Measured against the Netflix English (USA) spec above. The
-same run also measured it against the Subtitle Templates profile at 17 cps, which
-gives 179 violations before and 105 after, timing 149 to 75, 78 cues retimed.
+`iron_mask.asr.srt`. One run, the same file, measured against both cited profiles.
+
+The page opens on **Subtitle Templates**, because it is the stricter of the two and
+the run that shows the most is the one worth leading with. So these are the numbers
+on screen at zero clicks:
+
+| Check | Limit read off the page | Before repair | After repair |
+|---|---|---|---|
+| Reading speed | 17 chars/sec | **107** | 63 |
+| Minimum duration | 0.8 s | **42** | 12 |
+| of which out-time not after in-time | | 2 | 0 |
+| Line length | 42 chars | 30 | 30 |
+| Lines per subtitle | 2 | 0 | 0 |
+| **Timing total** | | **149** | **75** |
+| All violations | | 179 | 105 |
+
+78 cues retimed. Verdict: **HOLD**.
+
+And the same file against **English (USA)**, whose page states 20 chars/sec:
 
 | Check | Limit read off the page | Before repair | After repair |
 |---|---|---|---|
 | Reading speed | 20 chars/sec | **46** | 26 |
 | Minimum duration | 0.8 s | **42** | 12 |
-| of which out-time not after in-time | | 2 | 0 |
 | Line length | 42 chars | 30 | 30 |
-| Lines per subtitle | 2 | 0 | 0 |
 | **Timing total** | | **88** | **38** |
 | All violations | | 118 | 68 |
 
-51 cues retimed. 68 cues still failing, every one of them carrying the reason
-retiming could not clear it, and the first 40 carrying an editorial action from
-the triage agent. Verdict: **HOLD**.
+51 cues retimed. Verdict: **HOLD**.
+
+98 cues fail at least one profile, every one carrying the reason retiming could
+not clear it, and the first 40 carrying an editorial action from the triage agent.
 
 The "after" numbers come from running the same check a second time against the
-repaired file on disk, not from subtracting what the repair thinks it fixed. The
-repaired track and the source track are both downloadable, so the comparison can
-be reproduced rather than believed.
+repaired file on disk, not from subtracting what the repair thinks it fixed. Each
+profile gets its own repaired track, and both those and the source are
+downloadable, so the comparison can be reproduced rather than believed.
 
-**The headline pair is 88 to 38, the timing violations.** Not 118 to 68. Retiming
-extends out-times; it cannot shorten a 45-character line. Putting the 30
-line-length failures in the headline would credit the repair with cues it provably
-cannot touch. They are carried in the breakdown and in the editorial queue instead.
+**The headline pair is the timing total, 149 to 75 on the leading profile.** Not
+179 to 105. Retiming extends out-times; it cannot shorten a 45-character line.
+Putting the 30 line-length failures in the headline would credit the repair with
+cues it provably cannot touch. They are carried in the breakdown and in the
+editorial queue instead.
+
+Note that the reading-speed row is the only one that differs between the two
+tables. Minimum duration, line length and line count are identical, because both
+pages state the same limits for those. A four-column matrix where every column
+said the same thing would be decoration; this one earns its second column on one
+rule, and says so rather than implying more.
 
 ### The bug that made this number worse than it is
 
-An earlier run reported 89 to 65. That 65 was wrong, and wrong in the direction
-that made the product look weaker.
+An earlier run of the English (USA) profile reported 89 to 65 where it now reports
+88 to 38. That 65 was wrong, and wrong in the direction that made the product look
+weaker.
 
 SRT stores milliseconds. Subtracting two float seconds does not: `133.79 - 132.99`
 is `0.79999999999998295`. A cue the repair had retimed to exactly 800ms then
@@ -259,8 +294,9 @@ cannot survive, that it flags a cue which meets the spec.
 Comparisons now happen at the precision SRT actually stores, integer milliseconds,
 and reading speed at the two decimal places the sheet prints. The same fault had
 also left 13 cues failing with no recorded reason, because the leftover explainer
-and the re-measure disagreed by the same residue. Both are gone: 68 cues still
-fail, and all 68 carry a reason.
+and the re-measure disagreed by the same residue. Both are gone: on that profile
+68 cues still fail, 105 on the stricter one, and every one of them carries a
+reason.
 
 ### How the counting works, because two honest parsers disagree
 
@@ -370,9 +406,12 @@ landing page that opens on a clean file demonstrates nothing.
 ### Tests
 
 ```bash
-pytest tests.py test_spec_integrity.py test_real_data.py -q     # 77 passed
+pytest tests.py test_spec_integrity.py test_real_data.py -q     # 97 passed, 1 skipped
 node tests_sheet_filter.js
 ```
+
+The one skip is the live Parallel round trip in `test_real_data.py`, which needs
+`PARALLEL_API_KEY`. Everything else runs with no credential.
 
 `test_spec_integrity.py` is the suite worth reading. Every test in it guards a bug
 that actually happened, and every one has been checked in both directions: the bug
@@ -385,6 +424,8 @@ put back, the test confirmed red, the bug removed, the test confirmed green.
 | The default title must fail | pointing `DEFAULT_FILM` at the 14-cue trailer | `test_default_film_is_a_track_that_fails` |
 | A contrast needs two genuinely different specs | letting `_contrasts` compare equal thresholds | `test_two_profiles_with_the_same_threshold_produce_no_contrast` |
 | Neither profile may pin a reading speed | adding `max_cps` to the pinned fallbacks | `test_netflix_profiles_do_not_share_a_pinned_reading_speed` |
+| Minimum duration is the only pinned rule, and every pin is citable | pinning a second rule, or emptying a pin's clause | `test_min_duration_is_the_only_pinned_rule_and_every_pin_is_cited` |
+| A pinned value reaches the page as `fallback`, never as `live` | making `spec_from_ledger` label the pin `live` | `test_a_pinned_threshold_is_never_labelled_live` |
 | Only a page Extract opened becomes a spec | letting `spec_from_ledger` accept any URL | `test_a_url_nobody_opened_cannot_become_a_spec` |
 | The model has no field for a threshold | adding `max_cps` to `SpecChoice` | `test_the_model_is_never_asked_for_a_threshold` |
 | A cue repaired to exactly the limit passes | comparing float seconds again | `test_a_cue_exactly_at_the_limit_passes` |
@@ -424,6 +465,12 @@ app.py              FastAPI and the interface
 - Nobody has used this in production.
 - `min_duration_s` is derived at 24fps when a page states frames without a rate.
   Netflix states both the frame count and the fraction, and the fraction wins.
+- `min_duration_s` is also the one rule with a pinned fallback, because neither
+  Netflix profile's own page states it. When the fallback fires the number is not
+  live: it is pinned in `parallel_spec.PINNED_FALLBACKS` with the Netflix page
+  that publishes it and that page's exact sentence, and labelled `fallback` in the
+  payload and on screen. Every other threshold, on every run, is live or is not
+  measured at all.
 
 ## License
 
