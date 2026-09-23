@@ -27,8 +27,6 @@ htmlcov/
 mitm_mcp_traffic.db
 JCODE-STEER.md
 
-# internal status board, never shipped to judges
+# internal status board, not committed
 .progress/
 
-# private board, symlinked for the local win-conditions gate, never shipped
-docs/WIN-CONDITIONS.md
